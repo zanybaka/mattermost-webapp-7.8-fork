@@ -1,0 +1,591 @@
+// Ported from Mattermost Desktop Activity panel injection (externalAPI.ts).
+// Adapted to fill the webapp center channel instead of a fixed overlay.
+
+.ActivityView {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+}
+
+#desktop-activity-content-panel {
+    position: relative;
+    inset: auto;
+    top: auto;
+    bottom: auto;
+    right: auto;
+    left: auto;
+    background: var(--center-channel-bg, #fff);
+    color: var(--center-channel-color, inherit);
+    z-index: auto;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border-left: none;
+}
+
+.desktop-activity-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(61, 60, 64, 0.12);
+}
+
+.desktop-activity-header-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.desktop-activity-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.desktop-activity-header-toggles {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: rgba(63, 67, 80, 0.84);
+    line-height: 1;
+    margin: 0;
+}
+
+.desktop-activity-header-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    cursor: pointer;
+    line-height: 1;
+    margin: 0;
+}
+
+.desktop-activity-header-toggle input {
+    margin: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+    accent-color: var(--button-bg, #166de0);
+    align-self: center;
+}
+
+.desktop-activity-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.desktop-activity-actions button {
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    height: 34px;
+    width: 34px;
+    padding: 0;
+    color: rgba(63, 67, 80, 0.88);
+    font-size: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.desktop-activity-actions button i {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.desktop-activity-actions button:hover {
+    background-color: rgba(63, 67, 80, 0.08);
+    color: rgba(63, 67, 80, 1);
+}
+
+.desktop-activity-actions button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.desktop-activity-search-row button {
+    border: 1px solid rgba(61, 60, 64, 0.16);
+    background: transparent;
+    border-radius: 4px;
+    height: 28px;
+    padding: 0 10px;
+    cursor: pointer;
+}
+
+.desktop-activity-search {
+    padding: 8px 16px;
+    border-bottom: 1px solid rgba(61, 60, 64, 0.08);
+}
+
+.desktop-activity-search-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.desktop-activity-search-row input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid rgba(61, 60, 64, 0.16);
+    border-radius: 4px;
+    height: 28px;
+    padding: 0 8px;
+    background: transparent;
+    color: inherit;
+}
+
+.desktop-activity-filters {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 2px;
+}
+
+.desktop-activity-highlight-filter {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(63, 67, 80, 0.84);
+    white-space: nowrap;
+}
+
+.desktop-activity-highlight-filter input {
+    margin: 0;
+    cursor: pointer;
+}
+
+.desktop-activity-highlight-filter-label {
+    cursor: pointer;
+}
+
+.desktop-activity-filter-btn {
+    border: 1px solid rgba(61, 60, 64, 0.2);
+    background: transparent;
+    border-radius: 12px;
+    height: 24px;
+    min-width: 24px;
+    padding: 0 8px;
+    cursor: pointer;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: rgba(63, 67, 80, 0.78);
+}
+
+.desktop-activity-filter-btn.is-active {
+    background: rgba(22, 109, 224, 0.12);
+    border-color: rgba(22, 109, 224, 0.32);
+    color: rgba(22, 109, 224, 1);
+}
+
+.desktop-activity-filter-btn--all {
+    font-weight: 600;
+}
+
+.desktop-activity-feed {
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.desktop-activity-load-more {
+    border: 1px solid rgba(61, 60, 64, 0.16);
+    background: transparent;
+    border-radius: 4px;
+    height: 30px;
+    padding: 0 14px;
+    cursor: pointer;
+    color: var(--button-bg, #166de0);
+    font-weight: 600;
+}
+
+.desktop-activity-load-more:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.desktop-activity-load-more-row {
+    display: flex;
+    justify-content: center;
+}
+
+.desktop-activity-day-separator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 16px 10px;
+}
+
+.desktop-activity-day-separator-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: rgba(255, 255, 255, 0.96);
+    background: rgba(20, 22, 28, 0.92);
+    border: 1px solid rgba(20, 22, 28, 0.98);
+}
+
+.desktop-activity-item {
+    border-bottom: 1px solid rgba(61, 60, 64, 0.08);
+    padding: 10px 16px;
+}
+
+.desktop-activity-item--reminder {
+    background: #ffe6e8 !important;
+    border-left: 3px solid #d24b4e;
+    padding-left: 13px;
+}
+
+.desktop-activity-item[data-kind="reminder"] {
+    background: #ffe6e8 !important;
+    border-left: 3px solid #d24b4e;
+    padding-left: 13px;
+}
+
+.desktop-activity-item[data-kind="reminder"] .desktop-activity-item-body {
+    background: #ffe6e8 !important;
+}
+
+.desktop-activity-item--reminder .desktop-activity-item-clickable:hover {
+    background: rgba(210, 75, 78, 0.12);
+}
+
+.desktop-activity-item[data-kind="reminder"] .desktop-activity-item-clickable:hover {
+    background: rgba(210, 75, 78, 0.12);
+}
+
+.desktop-activity-item[data-kind="gm"] {
+    background: #fff8df;
+    border-left: 3px solid #d2ad3d;
+    padding-left: 13px;
+}
+
+.desktop-activity-item[data-kind="gm"] .desktop-activity-item-body {
+    background: #fff8df;
+}
+
+.desktop-activity-item[data-kind="gm"] .desktop-activity-item-clickable:hover {
+    background: rgba(210, 173, 61, 0.14);
+}
+
+.desktop-activity-item[data-kind="dm"] {
+    background: #e9f8ee;
+    border-left: 3px solid #3aa868;
+    padding-left: 13px;
+}
+
+.desktop-activity-item[data-kind="dm"] .desktop-activity-item-body {
+    background: #e9f8ee;
+}
+
+.desktop-activity-item[data-kind="dm"] .desktop-activity-item-clickable:hover {
+    background: rgba(58, 168, 104, 0.14);
+}
+
+.desktop-activity-item--mention-personal {
+    background: #e9f8ee;
+    border-left: 3px solid #3aa868;
+    padding-left: 13px;
+}
+
+.desktop-activity-item--mention-personal .desktop-activity-item-body {
+    background: #e9f8ee;
+}
+
+.desktop-activity-item--mention-personal .desktop-activity-item-clickable:hover {
+    background: rgba(58, 168, 104, 0.14);
+}
+
+.desktop-activity-item--mention-broadcast {
+    background: #fff8df;
+    border-left: 3px solid #d2ad3d;
+    padding-left: 13px;
+}
+
+.desktop-activity-item--mention-broadcast .desktop-activity-item-body {
+    background: #fff8df;
+}
+
+.desktop-activity-item--mention-broadcast .desktop-activity-item-clickable:hover {
+    background: rgba(210, 173, 61, 0.14);
+}
+
+.desktop-activity-item-clickable {
+    cursor: pointer;
+}
+
+.desktop-activity-item-clickable:hover {
+    background: rgba(63, 67, 80, 0.04);
+}
+
+.desktop-activity-item-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.desktop-activity-avatar-slot {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    background: rgba(63, 67, 80, 0.1);
+    overflow: hidden;
+}
+
+.desktop-activity-avatar {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    z-index: 2;
+}
+
+.desktop-activity-avatar--visible {
+    opacity: 1;
+}
+
+.desktop-activity-avatar-fallback {
+    position: absolute;
+    inset: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    color: rgba(63, 67, 80, 0.68);
+    font-size: 18px;
+}
+
+.desktop-activity-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.desktop-activity-title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 3px;
+    min-width: 0;
+}
+
+.desktop-activity-item-meta {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+    margin-left: auto;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+.desktop-activity-item-time {
+    flex-shrink: 0;
+    white-space: nowrap;
+    font-size: 12px;
+    color: rgba(63, 67, 80, 0.56);
+}
+
+.desktop-activity-item-hide {
+    border: none;
+    background: transparent;
+    color: var(--error-text, #d24b4e);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    transform: translateY(-1px);
+}
+
+.desktop-activity-item-hide:hover {
+    background: rgba(210, 75, 78, 0.15);
+    color: var(--error-text, #d24b4e);
+}
+
+.desktop-activity-item-hide:focus-visible {
+    outline: 2px solid rgba(22, 109, 224, 0.45);
+    outline-offset: 1px;
+}
+
+.desktop-activity-unread-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3aa868;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.desktop-activity-actor {
+    border: none;
+    background: none;
+    color: inherit;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.25;
+    flex: 0 1 auto;
+    min-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.desktop-activity-kind {
+    font-size: 14px;
+    color: rgba(63, 67, 80, 0.72);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+}
+
+.desktop-activity-message {
+    font-size: 14px;
+    line-height: 20px;
+    margin-top: 0;
+    white-space: normal;
+}
+
+.desktop-activity-reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.desktop-activity-reaction-emoji {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
+.desktop-activity-reaction-shortcode {
+    display: none;
+}
+
+.desktop-activity-message a {
+    color: var(--button-bg, #166de0);
+    text-decoration: none;
+}
+
+.desktop-activity-message a:hover {
+    text-decoration: underline;
+}
+
+.desktop-activity-message code {
+    font-family: Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(63, 67, 80, 0.1);
+}
+
+.desktop-activity-message ul,
+.desktop-activity-message ol {
+    margin: 6px 0 6px 18px;
+    padding: 0;
+}
+
+.desktop-activity-message li {
+    margin: 2px 0;
+}
+
+.desktop-activity-actor strong {
+    color: inherit;
+    font-weight: 600;
+}
+
+.desktop-activity-gm-meta {
+    font-size: 12px;
+    margin-right: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    text-align: right;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: rgba(63, 67, 80, 0.12);
+    opacity: 1;
+    min-width: 0;
+    flex-shrink: 1;
+}
+
+.desktop-activity-channel-meta {
+    font-size: 12px;
+    margin-right: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    text-align: right;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: rgba(63, 67, 80, 0.12);
+    opacity: 1;
+    min-width: 0;
+    flex-shrink: 1;
+}
+
+.desktop-activity-empty,
+.desktop-activity-error,
+.desktop-activity-loading {
+    padding: 12px 16px;
+    font-size: 13px;
+}
+
+.desktop-activity-error {
+    color: var(--error-text, #d24b4e);
+}

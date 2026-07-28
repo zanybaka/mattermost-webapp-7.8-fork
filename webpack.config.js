@@ -500,10 +500,28 @@ if (targetIsTest) {
 }
 
 if (targetIsDevServer) {
+    const rewriteProxyCookies = (proxyRes) => {
+        const setCookie = proxyRes.headers['set-cookie'];
+        if (!setCookie) {
+            return;
+        }
+
+        proxyRes.headers['set-cookie'] = setCookie.map((cookie) => {
+            return cookie.
+                replace(/Domain=[^;]+/gi, 'Domain=localhost').
+                replace(/;\s*Secure/gi, '').
+                replace(/SameSite=None/gi, 'SameSite=Lax');
+        });
+    };
+
     const proxyToServer = {
         logLevel: 'silent',
         target: process.env.MM_SERVICESETTINGS_SITEURL ?? 'http://localhost:8065',
+        changeOrigin: true,
+        secure: true,
         xfwd: true,
+        cookieDomainRewrite: 'localhost',
+        onProxyRes: rewriteProxyCookies,
     };
 
     config = {
@@ -520,6 +538,8 @@ if (targetIsDevServer) {
                 },
                 '/plugins': proxyToServer,
                 '/static/plugins': proxyToServer,
+                '/login': proxyToServer,
+                '/oauth': proxyToServer,
             },
             port: 9005,
             devMiddleware: {

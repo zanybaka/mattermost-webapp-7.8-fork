@@ -18,6 +18,7 @@ export enum LhsPage {
     Drafts = 'drafts',
     Insights = 'activity-and-insights',
     Threads = 'threads',
+    Activity = 'activity',
 }
 
 export type StaticPage = {

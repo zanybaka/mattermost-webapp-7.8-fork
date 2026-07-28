@@ -15,8 +15,11 @@ coverage
 config.override.mk
 *.tsbuildinfo
 
-# Environment variables
-.env*
+# Environment variables / local secrets
+.env
+.env.*
+!.env.*.example
+local.env
 *.crt
 *.key
 

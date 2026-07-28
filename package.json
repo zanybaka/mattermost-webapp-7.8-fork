@@ -227,6 +227,7 @@
     "run": "node scripts/run",
     "run:webapp": "webpack --progress --watch",
     "dev-server": "node scripts/dev-server",
+    "dev-server:remote": "node scripts/dev-server-remote.js",
     "dev-server:webapp": "webpack serve --mode development",
     "test": "cross-env TZ=Etc/UTC jest --maxWorkers=50%",
     "test-ci": "cross-env NODE_OPTIONS=--max_old_space_size=500 TZ=Etc/UTC jest --ci --maxWorkers=8",

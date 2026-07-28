@@ -30,17 +30,24 @@ export const getVisibleStaticPages = createSelector(
     (insightsEnabled, collapsedThreadsEnabled, localDraftsEnabled, draftsCount) => {
         const staticPages: StaticPage[] = [];
 
+        // Fork Activity always visible (replaces Threads/Mentions UX).
+        staticPages.push({
+            id: 'activity',
+            isVisible: true,
+        });
+
         if (insightsEnabled) {
             staticPages.push({
                 id: 'activity-and-insights',
-                isVisible: true,
+                isVisible: false, // hidden in this fork (desktop parity)
             });
         }
 
+        // Threads LHS is hidden in this fork; keep CRT feature for permalinks but not as a static page.
         if (collapsedThreadsEnabled) {
             staticPages.push({
                 id: 'threads',
-                isVisible: true,
+                isVisible: false,
             });
         }
 

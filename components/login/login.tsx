@@ -515,7 +515,7 @@ const Login = ({onCustomizeHeader}: LoginProps) => {
             return;
         }
 
-        if (!password) {
+        if (!currentPassword) {
             setAlertBanner({
                 mode: 'danger',
                 title: formatMessage({id: 'login.noPassword', defaultMessage: 'Please enter your password'}),
@@ -526,7 +526,9 @@ const Login = ({onCustomizeHeader}: LoginProps) => {
             return;
         }
 
-        submit({loginId, password});
+        // Use values read from the DOM (current*), not React state — password managers
+        // often fill inputs without firing onChange, so state can be stale/empty.
+        submit({loginId: currentLoginId, password: currentPassword});
     };
 
     const submit = async ({loginId, password, token}: SubmitOptions) => {

@@ -63,7 +63,12 @@ describe('Selectors.Lhs', () => {
             jest.spyOn(PreferencesSelectors, 'localDraftsAreEnabled').mockImplementationOnce(() => false);
             jest.spyOn(Lhs, 'getDraftsCount').mockImplementationOnce(() => 0);
             const items = Lhs.getVisibleStaticPages(state as GlobalState);
-            expect(items).toEqual([]);
+            expect(items).toEqual([
+                {
+                    id: 'activity',
+                    isVisible: true,
+                },
+            ]);
         });
 
         it('handles insights', () => {
@@ -74,7 +79,7 @@ describe('Selectors.Lhs', () => {
             const items = Lhs.getVisibleStaticPages(state as GlobalState);
             expect(items).toEqual([
                 {
-                    id: 'activity-and-insights',
+                    id: 'activity',
                     isVisible: true,
                 },
             ]);
@@ -88,7 +93,7 @@ describe('Selectors.Lhs', () => {
             const items = Lhs.getVisibleStaticPages(state as GlobalState);
             expect(items).toEqual([
                 {
-                    id: 'threads',
+                    id: 'activity',
                     isVisible: true,
                 },
             ]);
@@ -100,7 +105,12 @@ describe('Selectors.Lhs', () => {
             jest.spyOn(PreferencesSelectors, 'localDraftsAreEnabled').mockImplementation(() => true);
             jest.spyOn(Lhs, 'getDraftsCount').mockImplementationOnce(() => 0);
             const items = Lhs.getVisibleStaticPages(state as GlobalState);
-            expect(items).toEqual([]);
+            expect(items).toEqual([
+                {
+                    id: 'activity',
+                    isVisible: true,
+                },
+            ]);
         });
 
         it('should return drafts when there are available', () => {
@@ -110,6 +120,10 @@ describe('Selectors.Lhs', () => {
             jest.spyOn(Lhs, 'getDraftsCount').mockImplementationOnce(() => 1);
             const items = Lhs.getVisibleStaticPages(state as GlobalState);
             expect(items).toEqual([
+                {
+                    id: 'activity',
+                    isVisible: true,
+                },
                 {
                     id: 'drafts',
                     isVisible: true,

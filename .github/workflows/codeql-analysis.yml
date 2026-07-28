@@ -1,13 +1,8 @@
 name: "CodeQL"
 
+# Fork: disabled auto-run (manual only). See release-fork.yml for builds.
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ master ]
-  schedule:
-    - cron: '0 0 * * 0'
+  workflow_dispatch:
 
 permissions:
   contents: read

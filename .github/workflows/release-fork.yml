@@ -1,0 +1,86 @@
+# Release workflow for fork — manual run only, creates GitHub Release with webapp dist zip.
+#
+# Usage: Actions → release-fork → Run workflow
+#   Branch: release-7.8-fork
+#   Tag: e.g. 7.8.0-fork-releaseN
+# package.json stays at 7.8.0; the tag is the public release number.
+# See README.md → GitHub Actions (release-fork) for the full merge/tag flow.
+
+name: release-fork
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. 7.8.0-fork-release1)'
+        required: true
+        default: '7.8.0-fork-release1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Pack dist
+        run: |
+          test -d dist
+          VERSION=$(jq -r .version package.json)
+          ZIP="mattermost-webapp-${VERSION}.zip"
+          (cd dist && zip -r "../${ZIP}" .)
+          mkdir -p build
+          mv "${ZIP}" build/
+          ls -la build/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webapp-dist
+          path: build/*.zip
+
+  release:
+    runs-on: ubuntu-22.04
+    needs: [build]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: webapp-dist
+          path: ghr-dist
+      - name: Create release notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Mattermost Web App (7.8 fork)
+
+          Webapp **v7.8** fork with Activity feed.
+
+          ### Artifact
+          - `mattermost-webapp-*.zip` — production static assets from `dist/`
+
+          ### Dev
+          - `npm run dev-server:remote` — local UI with API proxy (see `docs/DEV.md` / `local.env`)
+
+          See README for deploy notes.
+          EOF
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(echo "$GH_TAG" | sed 's/^v//')
+          TITLE="${VERSION} — webapp fork"
+          ls -la ghr-dist/
+          gh release create "$GH_TAG" --title "$TITLE" --target "$GH_SHA" -F release-notes.md ghr-dist/*

@@ -1,11 +1,7 @@
 name: Scorecards supply-chain security
+# Fork: disabled auto-run (manual only). See release-fork.yml for builds.
 on:
-  # Only the default branch is supported.
-  branch_protection_rule:
-  schedule:
-    - cron: '19 8 * * 4'
-  push:
-    branches: [ master ]
+  workflow_dispatch:
 
 # Declare default permissions as read only.
 permissions: read-all

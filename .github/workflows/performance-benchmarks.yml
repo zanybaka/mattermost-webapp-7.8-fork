@@ -1,12 +1,7 @@
 name: Performance Benchmarks
+# Fork: disabled auto-run (manual only). See release-fork.yml for builds.
 on:
-  push:
-    branches:
-      - master
-      - release-**
-  pull_request:
-    branches:
-      - master
+  workflow_dispatch:
 
 jobs:
   cypress-run:

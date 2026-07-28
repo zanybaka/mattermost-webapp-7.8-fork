@@ -48,6 +48,16 @@ const LazyActivityAndInsights = makeAsyncComponent(
     ),
 );
 
+const LazyActivity = makeAsyncComponent(
+    'LazyActivity',
+    React.lazy(() => import('components/activity/activity_view')),
+    (
+        <div className='app__content'>
+            <LoadingScreen/>
+        </div>
+    ),
+);
+
 type Props = PropsFromRedux & OwnProps;
 
 type State = {
@@ -128,6 +138,10 @@ export default class CenterChannel extends React.PureComponent<Props, State> {
                         <Route
                             path='/:team/drafts'
                             component={LazyDrafts}
+                        />
+                        <Route
+                            path='/:team/activity'
+                            component={LazyActivity}
                         />
                         {insightsAreEnabled ? (
                             <Route
