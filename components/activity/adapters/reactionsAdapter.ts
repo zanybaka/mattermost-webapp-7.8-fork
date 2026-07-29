@@ -186,6 +186,9 @@ export class ReactionsAdapter implements ActivitySourceAdapter {
         return {
             kind: this.kind,
             items,
+
+            // Partial search failures still surface so the feed can flag stale data.
+            error: firstError,
             nextCursor: undefined,
         };
     }

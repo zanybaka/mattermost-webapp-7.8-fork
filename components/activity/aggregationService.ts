@@ -6,6 +6,7 @@ import type {ActivityAggregationService as ActivityAggregationServiceContract, A
 import {mergeActivityItems} from './merge';
 import type {ActivityEventKind, ActivityItem, ActivityPage, PersistedActivityState} from './types';
 import {deserializePersistedActivityState, serializePersistedActivityState} from './persistence';
+import {logActivityError, toErrorMessage} from './errors';
 
 import {getUserAvatarURL} from './api';
 import {DMGMAdapter} from './adapters/dmGmAdapter';
@@ -85,7 +86,8 @@ function loadFromLocalStorage(serverId: string): PersistedActivityState | null {
             return null;
         }
         return deserializePersistedActivityState(raw);
-    } catch {
+    } catch (error) {
+        logActivityError('failed to read persisted state', error);
         return null;
     }
 }
@@ -93,8 +95,9 @@ function loadFromLocalStorage(serverId: string): PersistedActivityState | null {
 function saveToLocalStorage(state: PersistedActivityState) {
     try {
         window.localStorage.setItem(getStorageKey(state.serverId), serializePersistedActivityState(state));
-    } catch {
+    } catch (error) {
         // Keep Activity usable even when storage is unavailable.
+        logActivityError('failed to persist state', error);
     }
 }
 
@@ -162,14 +165,27 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
             const runs = adapters.map(async (adapter) => {
                 const cursor = cursorMap[adapter.kind];
                 const page = parsePage(cursor);
-                const result = await adapter.fetch({
-                    serverId: context.serverId,
-                    userId: context.userId,
-                    pageSize,
-                    page,
-                    sinceMs,
-                    beforeMs,
-                });
+
+                let result;
+                try {
+                    result = await adapter.fetch({
+                        serverId: context.serverId,
+                        userId: context.userId,
+                        pageSize,
+                        page,
+                        sinceMs,
+                        beforeMs,
+                    });
+                } catch (error) {
+                    // A throwing adapter must not blank the whole feed.
+                    logActivityError(`adapter ${adapter.kind} failed`, error);
+                    errors.push({
+                        source: adapter.kind,
+                        message: toErrorMessage(error, `${adapter.kind} source failed`),
+                        retriable: true,
+                    });
+                    return [];
+                }
 
                 if (result.nextCursor) {
                     nextCursorMap[adapter.kind] = result.nextCursor;

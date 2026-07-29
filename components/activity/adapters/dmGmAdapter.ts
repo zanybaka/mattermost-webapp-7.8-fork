@@ -76,15 +76,21 @@ async function fetchUserById(userId: string, userCache: Map<string, Promise<User
     return request;
 }
 
-async function fetchChannelPosts(channelId: string, page: number, perPage: number): Promise<PostRecord[]> {
+async function fetchChannelPosts(
+    channelId: string,
+    page: number,
+    perPage: number,
+): Promise<{posts: PostRecord[]; error?: string}> {
     const response = await fetchJSON(`/api/v4/channels/${encodeURIComponent(channelId)}/posts?page=${page}&per_page=${perPage}`);
     if (!response.ok) {
-        return [];
+        return {posts: [], error: response.error};
     }
 
-    return getPostsFromPayload(response.data).
-        map((post) => ({...post, id: String(post.id || '')} as PostRecord)).
-        filter((post) => Boolean(post.id));
+    return {
+        posts: getPostsFromPayload(response.data).
+            map((post) => ({...post, id: String(post.id || '')} as PostRecord)).
+            filter((post) => Boolean(post.id)),
+    };
 }
 
 function normalizeChannelPostActivity({
@@ -156,10 +162,14 @@ export class DMGMAdapter implements ActivitySourceAdapter {
         const selfUsername = await getCurrentUserUsername(params.serverId, params.userId);
         const items = [] as ActivityItem[];
         let hasMore = false;
+        let firstChannelError: string | undefined;
 
         await forEachWithConcurrency(records, DM_GM_FETCH_CONCURRENCY, async (channel) => {
             const postsPerChannel = Math.min(params.pageSize, MAX_DM_GM_POSTS_PER_CHANNEL);
-            const posts = await fetchChannelPosts(channel.id, params.page, postsPerChannel);
+            const {posts, error} = await fetchChannelPosts(channel.id, params.page, postsPerChannel);
+            if (error && !firstChannelError) {
+                firstChannelError = error;
+            }
             if (posts.length >= postsPerChannel) {
                 hasMore = true;
             }
@@ -200,6 +210,9 @@ export class DMGMAdapter implements ActivitySourceAdapter {
         return {
             kind: this.kind,
             items: filteredItems,
+
+            // Per-channel failures still surface so the feed can flag incomplete data.
+            error: firstChannelError,
             nextCursor: hasMore ? String(params.page + 1) : undefined,
         };
     }

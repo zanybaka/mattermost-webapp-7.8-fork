@@ -168,6 +168,9 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
             return {kind: this.kind, items: [], error: lastError};
         }
 
+        // Partial endpoint failures still surface so the feed can flag stale data.
+        const partialError = lastError || undefined;
+
         const channelsMap = await loadChannelsById();
         const userMap = await loadUsersById(collected.
             map((thread) => extractThreadActorUserId(thread)).
@@ -196,6 +199,7 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
         return {
             kind: this.kind,
             items: filteredItems,
+            error: partialError,
             nextCursor: String(params.page + 1),
         };
     }

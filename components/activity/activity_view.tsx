@@ -17,6 +17,7 @@ import activityAggregationService from './aggregationService';
 import type {ActivityLoadContext} from './interfaces';
 import type {ActivityItem, ActivityPage, ActivityEventKind} from './types';
 import {renderActivityMarkdown} from './activityMarkdown';
+import {logActivityError, toErrorMessage} from './errors';
 import {
     ACTIVITY_FILTER_KINDS,
     ACTIVITY_KIND_ICONS,
@@ -46,6 +47,12 @@ type PersistedActivityFilters = {
     hideThreadItems?: boolean;
     hideMentionReactionItems?: boolean;
 };
+
+function formatSourceErrors(page: ActivityPage): string[] {
+    return (page.errors || []).
+        filter((sourceError) => Boolean(sourceError?.message)).
+        map((sourceError) => `${sourceError.source}: ${sourceError.message}`);
+}
 
 function getHiddenActivityStorageKey(serverId?: string) {
     return `${ACTIVITY_HIDDEN_ITEMS_STORAGE_KEY_PREFIX}:${(serverId || 'global').trim() || 'global'}`;
@@ -94,6 +101,7 @@ export default function ActivityView() {
     const [query, setQuery] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [sourceErrors, setSourceErrors] = useState<string[]>([]);
     const [hasMore, setHasMore] = useState(true);
 
     const [loadedAvatarKeys, setLoadedAvatarKeys] = useState<Set<string>>(new Set());
@@ -119,16 +127,16 @@ export default function ActivityView() {
     const persistActivityFilters = useCallback((next: PersistedActivityFilters) => {
         try {
             window.localStorage.setItem(ACTIVITY_FILTERS_STORAGE_KEY, JSON.stringify(next));
-        } catch {
-            // ignore persistence errors
+        } catch (e) {
+            logActivityError('failed to persist filters', e);
         }
     }, []);
 
     const persistHiddenActivityItemIds = useCallback((next: Set<string>) => {
         try {
             window.localStorage.setItem(getHiddenActivityStorageKey(teamId), JSON.stringify(Array.from(next)));
-        } catch {
-            // ignore persistence errors
+        } catch (e) {
+            logActivityError('failed to persist hidden items', e);
         }
     }, [teamId]);
 
@@ -147,7 +155,8 @@ export default function ActivityView() {
             }
 
             setHiddenItemIds(new Set(parsed.filter((value) => typeof value === 'string')));
-        } catch {
+        } catch (e) {
+            logActivityError('failed to read hidden items', e);
             setHiddenItemIds(new Set());
         }
     }, [teamId]);
@@ -181,8 +190,8 @@ export default function ActivityView() {
             if (typeof parsed.hideMentionReactionItems === 'boolean') {
                 setHideMentionReactionItems(parsed.hideMentionReactionItems);
             }
-        } catch {
-            // ignore malformed persisted values
+        } catch (e) {
+            logActivityError('failed to read persisted filters', e);
         }
     }, []);
 
@@ -195,9 +204,11 @@ export default function ActivityView() {
         try {
             const page = await activityAggregationService.loadInitial(context) as ActivityPage;
             setItems(page.items || []);
+            setSourceErrors(formatSourceErrors(page));
             setHasMore(page.hasMore !== false);
         } catch (e) {
-            setError(String(e));
+            logActivityError('failed to load activity', e);
+            setError(toErrorMessage(e, 'failed to load activity'));
         } finally {
             setLoading(false);
         }
@@ -216,9 +227,11 @@ export default function ActivityView() {
         try {
             const page = await activityAggregationService.loadOlder(context, state) as ActivityPage;
             setItems(page.items || []);
+            setSourceErrors(formatSourceErrors(page));
             setHasMore(page.hasMore !== false);
         } catch (e) {
-            setError(String(e));
+            logActivityError('failed to load older activity', e);
+            setError(toErrorMessage(e, 'failed to load older activity'));
         } finally {
             setLoading(false);
         }
@@ -234,9 +247,11 @@ export default function ActivityView() {
             const state = activityAggregationService.getState(context.serverId) || undefined;
             const page = await activityAggregationService.refresh(context, state) as ActivityPage;
             setItems(page.items || []);
+            setSourceErrors(formatSourceErrors(page));
             setHasMore(page.hasMore !== false);
         } catch (e) {
-            setError(String(e));
+            logActivityError('failed to refresh activity', e);
+            setError(toErrorMessage(e, 'failed to refresh activity'));
         } finally {
             setLoading(false);
         }
@@ -261,7 +276,8 @@ export default function ActivityView() {
             setItems(Array.isArray(result) ? result : []);
             setHasMore(false);
         } catch (e) {
-            setError(String(e));
+            logActivityError('failed to search activity', e);
+            setError(toErrorMessage(e, 'failed to search activity'));
         } finally {
             setLoading(false);
         }
@@ -651,6 +667,11 @@ export default function ActivityView() {
                     {error && !filteredItems.length ? (
                         <div className='desktop-activity-error'>
                             {error}
+                        </div>
+                    ) : null}
+                    {sourceErrors.length ? (
+                        <div className='desktop-activity-source-errors'>
+                            {`Some activity sources failed to load: ${sourceErrors.join('; ')}`}
                         </div>
                     ) : null}
                     {loading && !filteredItems.length ? (
