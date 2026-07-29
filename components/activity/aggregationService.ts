@@ -1,7 +1,7 @@
 // Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {dedupeActivityItems, withCanonicalId} from './canonical';
+import {withCanonicalId} from './canonical';
 import type {ActivityAggregationService as ActivityAggregationServiceContract, ActivityLoadContext} from './interfaces';
 import {mergeActivityItems} from './merge';
 import type {ActivityEventKind, ActivityItem, ActivityPage, PersistedActivityState} from './types';
@@ -18,12 +18,15 @@ import type {ActivitySourceAdapter} from './adapters/types';
 const DEFAULT_PAGE_SIZE = 30;
 const MAX_PERSISTED_ITEMS = 5000;
 const INITIAL_MIN_NEW_ITEMS = 30;
-const INITIAL_MAX_ITERATIONS = 1;
+const INITIAL_MAX_ITERATIONS = 3;
 const OLDER_MIN_NEW_ITEMS = 100;
 const OLDER_MAX_ITERATIONS = 20;
+const PREVIEW_TEXT_MAX_LENGTH = 500;
 const DISPLAY_WINDOW_STEP_MS = 7 * 24 * 60 * 60 * 1000;
 
 type AdapterCursorMap = Partial<Record<ActivityEventKind, string>>;
+
+type LoadMode = 'initial' | 'older' | 'refresh';
 
 const STORAGE_KEY_PREFIX = 'mm-webapp-activity-state';
 
@@ -44,7 +47,7 @@ function resolveInitialVisibleSince(nowMs: number): number {
     return Math.max(0, nowMs - DISPLAY_WINDOW_STEP_MS);
 }
 
-function resolveVisibleSince(mode: 'initial' | 'older', nowMs: number, state?: PersistedActivityState): number {
+function resolveVisibleSince(mode: LoadMode, nowMs: number, state?: PersistedActivityState): number {
     const previousVisibleSince = state?.checkpoint?.visibleSinceMs ?? resolveInitialVisibleSince(nowMs);
     if (mode === 'older') {
         return Math.max(0, previousVisibleSince - DISPLAY_WINDOW_STEP_MS);
@@ -65,7 +68,7 @@ function toPersistedState(context: ActivityLoadContext, page: ActivityPage, allI
             serverId: item.serverId,
             targetUserId: item.targetUserId,
             eventTs: item.eventTs,
-            previewText: item.previewText,
+            previewText: item.previewText.slice(0, PREVIEW_TEXT_MAX_LENGTH),
             postId: item.postId,
             reminderId: item.reminderId,
             channelId: item.channelId,
@@ -102,8 +105,8 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
     private readonly adapters: ActivitySourceAdapter[];
     private readonly memoryState = new Map<string, PersistedActivityState>();
 
-    constructor() {
-        this.adapters = [
+    constructor(adapters?: ActivitySourceAdapter[]) {
+        this.adapters = adapters || [
             new MentionsAdapter(),
             new ThreadsAdapter(),
             new ReactionsAdapter(),
@@ -141,7 +144,7 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
 
     private fetchAdapters = async (
         context: ActivityLoadContext,
-        mode: 'initial' | 'older',
+        mode: LoadMode,
         state?: PersistedActivityState,
     ): Promise<{page: ActivityPage; allItems: ActivityItem[]}> => {
         const nowMs = context.nowMs || Date.now();
@@ -194,8 +197,9 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
             };
         };
 
-        let merged: ActivityItem[] = mode === 'older' && state ? state.items : [];
-        let sourceCursors: AdapterCursorMap = {};
+        // Refreshing re-reads the newest page but must not discard already paged history.
+        let merged: ActivityItem[] = mode === 'initial' ? [] : (state?.items || []);
+        let sourceCursors: AdapterCursorMap = mode === 'refresh' && state ? {...(state.sourceCursors || {})} : {};
 
         const targetNewItems = mode === 'older' ? OLDER_MIN_NEW_ITEMS : INITIAL_MIN_NEW_ITEMS;
         const maxIterations = mode === 'older' ? OLDER_MAX_ITERATIONS : INITIAL_MAX_ITERATIONS;
@@ -212,13 +216,17 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
             // Adapter cursors from one round are required to construct the next round.
             // eslint-disable-next-line no-await-in-loop
             const round = await runAdapters(activeAdapters, cursorMap);
-            const nextMerged = mode === 'older' && state ? mergeActivityItems(merged, round.items) : dedupeActivityItems([...merged, ...round.items]);
+            const nextMerged = mergeActivityItems(merged, round.items);
             const newlyAdded = Math.max(0, nextMerged.length - merged.length);
 
             merged = nextMerged;
             totalNewItems += newlyAdded;
 
-            sourceCursors = round.nextCursorMap;
+            // A refresh restarts from the newest page, so it must not move the paging
+            // position the user already reached with "load older".
+            if (mode !== 'refresh') {
+                sourceCursors = round.nextCursorMap;
+            }
             cursorMap = round.nextCursorMap;
             activeAdapters = this.adapters.filter((adapter) => round.activeKinds.has(adapter.kind));
 
@@ -267,7 +275,7 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
     };
 
     refresh = async (context: ActivityLoadContext, state?: PersistedActivityState): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'initial', state);
+        const result = await this.fetchAdapters(context, state ? 'refresh' : 'initial', state);
         const persisted = toPersistedState(context, result.page, result.allItems);
         this.memoryState.set(context.serverId, persisted);
         saveToLocalStorage(persisted);
