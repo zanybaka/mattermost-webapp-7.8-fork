@@ -3,9 +3,18 @@
 
 import type {ActivityItem} from './types';
 
+function getReactionKey(item: ActivityItem): string {
+    return `post:${item.postId || ''}:actor:${item.actorUserId || ''}:emoji:${item.sourceRef?.emoji || ''}`;
+}
+
 function getStableSourceKey(item: ActivityItem): string {
     if (item.eventKind === 'reminder' && item.reminderId) {
         return `reminder:${item.reminderId}`;
+    }
+
+    if (item.eventKind === 'reaction') {
+        // One card per reaction: the same post can be reacted to by many users with many emojis.
+        return getReactionKey(item);
     }
 
     if (item.postId) {
@@ -21,7 +30,7 @@ function getStableSourceKey(item: ActivityItem): string {
         return `source:${item.sourceRef.id}`;
     }
 
-    return 'unknown';
+    return `channel:${item.channelId || ''}:actor:${item.actorUserId || ''}:ts:${item.eventTs}`;
 }
 
 export function toCanonicalId(item: ActivityItem): string {
@@ -31,6 +40,10 @@ export function toCanonicalId(item: ActivityItem): string {
 function toDedupKey(item: ActivityItem): string {
     if (item.eventKind === 'reminder' && item.reminderId) {
         return `reminder:${item.reminderId}`;
+    }
+
+    if (item.eventKind === 'reaction') {
+        return `reaction:${getReactionKey(item)}`;
     }
 
     if (item.postId) {

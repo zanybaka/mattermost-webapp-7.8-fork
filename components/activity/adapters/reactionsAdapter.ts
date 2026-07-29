@@ -249,7 +249,7 @@ export class ReactionsAdapter implements ActivitySourceAdapter {
                 String(reaction.channel_id || ''),
             )).
             filter((item) => {
-                const key = `${item.postId || ''}:${item.actorUserId || ''}:${item.sourceRef?.emoji || ''}:${item.eventTs}`;
+                const key = `${item.postId || ''}:${item.actorUserId || ''}:${item.sourceRef?.emoji || ''}`;
                 if (seen.has(key)) {
                     return false;
                 }

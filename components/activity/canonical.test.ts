@@ -56,6 +56,47 @@ describe('activity canonical helpers', () => {
         expect(dedupeActivityItems([first, second])).toHaveLength(2);
     });
 
+    test('keeps one card per reaction on the same post', () => {
+        const first = makeItem({
+            eventKind: 'reaction',
+            postId: 'post-1',
+            actorUserId: 'user-2',
+            sourceRef: {emoji: 'thumbsup'},
+        });
+        const second = makeItem({
+            eventKind: 'reaction',
+            postId: 'post-1',
+            actorUserId: 'user-3',
+            sourceRef: {emoji: 'thumbsup'},
+        });
+        const third = makeItem({
+            eventKind: 'reaction',
+            postId: 'post-1',
+            actorUserId: 'user-2',
+            sourceRef: {emoji: 'tada'},
+        });
+
+        expect(dedupeActivityItems([first, second, third])).toHaveLength(3);
+        expect(dedupeActivityItems([first, {...first, eventTs: 200}])).toHaveLength(1);
+    });
+
+    test('does not collapse unrelated items without a post or thread id', () => {
+        const first = makeItem({
+            eventKind: 'dm',
+            channelId: 'chan-1',
+            actorUserId: 'user-2',
+            eventTs: 100,
+        });
+        const second = makeItem({
+            eventKind: 'dm',
+            channelId: 'chan-1',
+            actorUserId: 'user-2',
+            eventTs: 200,
+        });
+
+        expect(dedupeActivityItems([first, second])).toHaveLength(2);
+    });
+
     test('fills missing canonical id', () => {
         const item = makeItem({
             eventKind: 'dm',
