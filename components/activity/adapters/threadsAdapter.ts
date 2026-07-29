@@ -1,13 +1,13 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
 import {getCurrentUserUsername, replaceMentionUsernamesWithDisplayNames} from '../mentionDisplay';
 import {fetchJSON, fetchJSONCached, getUserAvatarURL} from '../api';
 import {forEachWithConcurrency} from '../concurrency';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
 const THREAD_FETCH_CONCURRENCY = 4;
 
@@ -39,7 +39,7 @@ function formatChannelDisplayName(channel?: ChannelRecord): string {
     return (channel.display_name || channel.name || '').trim();
 }
 
-async function getTeamIds(serverId: string): Promise<string[]> {
+async function getTeamIds(): Promise<string[]> {
     const response = await fetchJSON('/api/v4/users/me/teams');
     if (!response.ok || !Array.isArray(response.data)) {
         return [];
@@ -186,7 +186,7 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
     kind: AdapterFetchResult['kind'] = 'thread_reply';
 
     async fetch(params: AdapterFetchParams): Promise<AdapterFetchResult> {
-        const teamIds = await getTeamIds(params.serverId);
+        const teamIds = await getTeamIds();
         const query = `deleted=false&page=${params.page}&per_page=${params.pageSize}&totalsOnly=false&extended=true&skipTotal=true&disable_channel_type_group=true`;
         const userPath = params.userId ? encodeURIComponent(params.userId) : 'me';
         const endpoints = teamIds.length ? teamIds.map((teamId) => (

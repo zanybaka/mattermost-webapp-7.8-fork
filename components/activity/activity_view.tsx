@@ -1,7 +1,8 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {FormattedMessage, useIntl} from 'react-intl';
 import {useDispatch, useSelector} from 'react-redux';
 import {useHistory} from 'react-router-dom';
 
@@ -12,6 +13,7 @@ import {selectLhsItem} from 'actions/views/lhs';
 import {suppressRHS, unsuppressRHS} from 'actions/views/rhs';
 import {LhsItemType, LhsPage} from 'types/store/lhs';
 import {getHistory} from 'utils/browser_history';
+import Constants from 'utils/constants';
 
 import activityAggregationService from './aggregationService';
 import type {ActivityLoadContext} from './interfaces';
@@ -20,14 +22,13 @@ import ActivityMessage from './activity_message';
 import {
     ACTIVITY_FILTER_KINDS,
     ACTIVITY_KIND_ICONS,
+    ACTIVITY_KIND_LABELS,
     formatActivityTime,
     getActivityActorName,
-    getActivityDayBadgeLabel,
+    getActivityDayBadge,
     getActivityDisplayKind,
-    getActivityKindMetaTitle,
     getActivityMessage,
     getActivityPanelItemId,
-    getActivityTitle,
     isActivityHighlightedItem,
     isReminderLikeItem,
 } from './activityDisplay';
@@ -50,31 +51,11 @@ function getHiddenActivityStorageKey(serverId?: string) {
     return `${ACTIVITY_HIDDEN_ITEMS_STORAGE_KEY_PREFIX}:${(serverId || 'global').trim() || 'global'}`;
 }
 
-function setSidebarSectionVisibilityByPath(pathFragment: string, hidden: boolean) {
-    const sidebar = document.getElementById('sidebar-left');
-    if (!sidebar) {
-        return;
-    }
-
-    const links = sidebar.querySelectorAll<HTMLAnchorElement>(`a[href*="${pathFragment}"]`);
-    links.forEach((link) => {
-        const container = (link.closest('li, div.SidebarNavItem, div[class*="sidebarItem"]') as HTMLElement | null) || link;
-        if (hidden) {
-            container.style.display = 'none';
-            return;
-        }
-        container.style.removeProperty('display');
-    });
-}
-
-function applyNativeSidebarSectionVisibility(hideThreadItems: boolean, hideMentionReactionItems: boolean) {
-    setSidebarSectionVisibilityByPath('/threads', hideThreadItems);
-    // Desktop hides Insights via href*=/activity; our Activity route is also /activity —
-    // only hide Insights, never the Activity tab itself.
-    setSidebarSectionVisibilityByPath('/activity-and-insights', hideMentionReactionItems);
-}
+const THREAD_KINDS: ActivityEventKind[] = ['thread_reply'];
+const MENTION_REACTION_KINDS: ActivityEventKind[] = ['mention', 'reaction'];
 
 export default function ActivityView() {
+    const {formatMessage} = useIntl();
     const dispatch = useDispatch();
     const history = useHistory();
 
@@ -93,7 +74,7 @@ export default function ActivityView() {
     const [query, setQuery] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [hasMore, setHasMore] = useState(true);
+    const [hasMore, setHasMore] = useState(false);
 
     const [loadedAvatarKeys, setLoadedAvatarKeys] = useState<Set<string>>(new Set());
     const [failedAvatarKeys, setFailedAvatarKeys] = useState<Set<string>>(new Set());
@@ -241,13 +222,20 @@ export default function ActivityView() {
         }
     }, [context, userId]);
 
+    // Clearing the filter restores the already loaded feed instead of refetching it.
+    const restoreLoadedItems = useCallback(() => {
+        const state = activityAggregationService.getState(context.serverId);
+        setItems(state?.items || []);
+        setHasMore(Object.values(state?.sourceCursors || {}).some(Boolean));
+    }, [context.serverId]);
+
     const searchLocal = useCallback(async (nextQuery: string) => {
         if (!userId) {
             return;
         }
         const trimmed = nextQuery.trim();
         if (!trimmed) {
-            refresh();
+            restoreLoadedItems();
             return;
         }
 
@@ -264,7 +252,7 @@ export default function ActivityView() {
         } finally {
             setLoading(false);
         }
-    }, [context.serverId, items, refresh, userId]);
+    }, [context.serverId, items, restoreLoadedItems, userId]);
 
     const hideItem = useCallback((itemId: string) => {
         setHiddenItemIds((prev) => {
@@ -277,6 +265,16 @@ export default function ActivityView() {
             return next;
         });
     }, [persistHiddenActivityItemIds]);
+
+    const closeActivity = useCallback(() => {
+        if (history.length > 1) {
+            history.goBack();
+            return;
+        }
+        if (teamName) {
+            history.replace(`/${teamName}/channels/${Constants.DEFAULT_CHANNEL}`);
+        }
+    }, [history, teamName]);
 
     const openItem = useCallback((item: ActivityItem) => {
         if (!teamName) {
@@ -309,13 +307,21 @@ export default function ActivityView() {
                 return false;
             }
 
+            if (hideThreadItems && THREAD_KINDS.includes(kindForDisplay)) {
+                return false;
+            }
+
+            if (hideMentionReactionItems && MENTION_REACTION_KINDS.includes(kindForDisplay)) {
+                return false;
+            }
+
             if (highlightedOnlyFilter && !isActivityHighlightedItem(item)) {
                 return false;
             }
 
             return true;
         });
-    }, [hiddenItemIds, highlightedOnlyFilter, items, kindFilters]);
+    }, [hiddenItemIds, hideMentionReactionItems, hideThreadItems, highlightedOnlyFilter, items, kindFilters]);
 
     const feedElements = useMemo(() => {
         let previousDayLabel = '';
@@ -323,21 +329,20 @@ export default function ActivityView() {
 
         filteredItems.forEach((item) => {
             const actorName = getActivityActorName(item);
-            const title = getActivityTitle(item, actorName);
             const message = getActivityMessage(item, actorName);
             const reminderLike = isReminderLikeItem(item, actorName);
             const kindForDisplay = (reminderLike ? 'reminder' : item.eventKind) as ActivityEventKind;
 
-            const dayLabel = getActivityDayBadgeLabel(item.eventTs);
-            if (dayLabel && dayLabel !== previousDayLabel) {
-                previousDayLabel = dayLabel;
+            const dayBadge = getActivityDayBadge(item.eventTs);
+            if (dayBadge.key && dayBadge.key !== previousDayLabel) {
+                previousDayLabel = dayBadge.key;
                 elements.push(
                     <div
-                        key={`day:${dayLabel}:${item.eventTs}`}
+                        key={`day:${dayBadge.key}:${item.eventTs}`}
                         className='desktop-activity-day-separator'
                     >
                         <span className='desktop-activity-day-separator-badge'>
-                            {dayLabel}
+                            {dayBadge.descriptor ? formatMessage(dayBadge.descriptor) : dayBadge.key}
                         </span>
                     </div>,
                 );
@@ -409,14 +414,17 @@ export default function ActivityView() {
                                 />
                             ) : null}
                             <span className='desktop-activity-avatar-fallback'>
-                                <i className={`icon ${ACTIVITY_KIND_ICONS[kindForDisplay] || 'icon-account-outline'}`} aria-hidden='true'/>
+                                <i
+                                    className={`icon ${ACTIVITY_KIND_ICONS[kindForDisplay] || 'icon-account-outline'}`}
+                                    aria-hidden='true'
+                                />
                             </span>
                         </span>
 
                         <div className='desktop-activity-item-content'>
                             <div className='desktop-activity-title-row'>
                                 <div className='desktop-activity-actor'>
-                                    <strong>{title}</strong>
+                                    <strong>{actorName || formatMessage(ACTIVITY_KIND_LABELS[kindForDisplay])}</strong>
                                 </div>
 
                                 <span className='desktop-activity-item-meta'>
@@ -431,10 +439,19 @@ export default function ActivityView() {
                                         </span>
                                     ) : null}
                                     {unreadDot ? (
-                                        <span className='desktop-activity-unread-dot' title='Unread'/>
+                                        <span
+                                            className='desktop-activity-unread-dot'
+                                            title={formatMessage({id: 'activity.unread', defaultMessage: 'Unread'})}
+                                        />
                                     ) : null}
-                                    <span className='desktop-activity-kind' title={getActivityKindMetaTitle(kindForDisplay)}>
-                                        <i className={`icon ${ACTIVITY_KIND_ICONS[kindForDisplay]}`} aria-hidden='true'/>
+                                    <span
+                                        className='desktop-activity-kind'
+                                        title={formatMessage(ACTIVITY_KIND_LABELS[kindForDisplay])}
+                                    >
+                                        <i
+                                            className={`icon ${ACTIVITY_KIND_ICONS[kindForDisplay]}`}
+                                            aria-hidden='true'
+                                        />
                                     </span>
                                     <span className='desktop-activity-item-time'>
                                         {formatActivityTime(item.eventTs)}
@@ -442,15 +459,15 @@ export default function ActivityView() {
                                     <button
                                         className='desktop-activity-item-hide'
                                         type='button'
-                                        aria-label='Hide'
-                                        title='Hide'
+                                        aria-label={formatMessage({id: 'activity.hide', defaultMessage: 'Hide'})}
+                                        title={formatMessage({id: 'activity.hide', defaultMessage: 'Hide'})}
                                         onClick={(event) => {
                                             event.preventDefault();
                                             event.stopPropagation();
                                             hideItem(itemId);
                                         }}
                                     >
-                                        ×
+                                        {'×'}
                                     </button>
                                 </span>
                             </div>
@@ -467,7 +484,7 @@ export default function ActivityView() {
         });
 
         return elements;
-    }, [failedAvatarKeys, filteredItems, hideItem, loadedAvatarKeys, openItem]);
+    }, [failedAvatarKeys, filteredItems, formatMessage, hideItem, loadedAvatarKeys, openItem]);
 
     useEffect(() => {
         dispatch(suppressRHS);
@@ -487,7 +504,6 @@ export default function ActivityView() {
         if (!filtersHydrated) {
             return;
         }
-        applyNativeSidebarSectionVisibility(hideThreadItems, hideMentionReactionItems);
         persistActivityFilters({
             kindFilters,
             highlightedOnly: highlightedOnlyFilter,
@@ -504,7 +520,7 @@ export default function ActivityView() {
     useEffect(() => {
         setLoadedAvatarKeys(new Set());
         setFailedAvatarKeys(new Set());
-        setHasMore(true);
+        setHasMore(false);
     }, [teamId]);
 
     return (
@@ -516,7 +532,10 @@ export default function ActivityView() {
                 <div className='desktop-activity-header'>
                     <div className='desktop-activity-header-left'>
                         <h2 className='desktop-activity-title'>
-                            {'Activity'}
+                            <FormattedMessage
+                                id='activity.title'
+                                defaultMessage='Activity'
+                            />
                         </h2>
                         <div className='desktop-activity-header-toggles'>
                             <label className='desktop-activity-header-toggle'>
@@ -525,7 +544,12 @@ export default function ActivityView() {
                                     checked={!hideThreadItems}
                                     onChange={(e) => setHideThreadItems(!e.target.checked)}
                                 />
-                                <span>{'Threads'}</span>
+                                <span>
+                                    <FormattedMessage
+                                        id='activity.toggle.threads'
+                                        defaultMessage='Threads'
+                                    />
+                                </span>
                             </label>
                             <label className='desktop-activity-header-toggle'>
                                 <input
@@ -533,27 +557,38 @@ export default function ActivityView() {
                                     checked={!hideMentionReactionItems}
                                     onChange={(e) => setHideMentionReactionItems(!e.target.checked)}
                                 />
-                                <span>{'Mentions + Reactions'}</span>
+                                <span>
+                                    <FormattedMessage
+                                        id='activity.toggle.mentionsAndReactions'
+                                        defaultMessage='Mentions + Reactions'
+                                    />
+                                </span>
                             </label>
                         </div>
                     </div>
                     <div className='desktop-activity-actions'>
                         <button
                             type='button'
-                            aria-label='Refresh'
-                            title='Refresh'
+                            aria-label={formatMessage({id: 'activity.refresh', defaultMessage: 'Refresh'})}
+                            title={formatMessage({id: 'activity.refresh', defaultMessage: 'Refresh'})}
                             disabled={!canLoad || loading}
                             onClick={refresh}
                         >
-                            <i className='icon icon-refresh' aria-hidden='true'/>
+                            <i
+                                className='icon icon-refresh'
+                                aria-hidden='true'
+                            />
                         </button>
                         <button
                             type='button'
-                            aria-label='Close'
-                            title='Close'
-                            onClick={() => history.goBack()}
+                            aria-label={formatMessage({id: 'activity.close', defaultMessage: 'Close'})}
+                            title={formatMessage({id: 'activity.close', defaultMessage: 'Close'})}
+                            onClick={closeActivity}
                         >
-                            <i className='icon icon-close' aria-hidden='true'/>
+                            <i
+                                className='icon icon-close'
+                                aria-hidden='true'
+                            />
                         </button>
                     </div>
                 </div>
@@ -563,7 +598,7 @@ export default function ActivityView() {
                         <input
                             ref={queryInputRef}
                             type='text'
-                            placeholder='Filter activity...'
+                            placeholder={formatMessage({id: 'activity.searchPlaceholder', defaultMessage: 'Filter activity...'})}
                             value={query}
                             disabled={!canLoad}
                             onChange={(e) => setQuery(e.target.value)}
@@ -575,10 +610,11 @@ export default function ActivityView() {
                                     const trimmed = (query || '').trim();
                                     if (trimmed) {
                                         setQuery('');
+                                        restoreLoadedItems();
                                         return;
                                     }
 
-                                    refresh();
+                                    closeActivity();
                                     return;
                                 }
 
@@ -591,9 +627,12 @@ export default function ActivityView() {
                         />
                         <button
                             type='button'
-                            onClick={() => queryInputRef.current?.focus()}
+                            onClick={() => searchLocal(query)}
                         >
-                            {'Filter'}
+                            <FormattedMessage
+                                id='activity.filter'
+                                defaultMessage='Filter'
+                            />
                         </button>
                         <div className='desktop-activity-filters'>
                             <button
@@ -611,7 +650,10 @@ export default function ActivityView() {
                                     });
                                 }}
                             >
-                                {'All'}
+                                <FormattedMessage
+                                    id='activity.filters.all'
+                                    defaultMessage='All'
+                                />
                             </button>
                             {ACTIVITY_FILTER_KINDS.map((kind) => {
                                 const isActive = kindFilters[kind] !== false;
@@ -621,17 +663,20 @@ export default function ActivityView() {
                                         type='button'
                                         className={`desktop-activity-filter-btn${isActive ? ' is-active' : ''}`}
                                         aria-pressed={isActive ? 'true' : 'false'}
-                                        title={getActivityKindMetaTitle(kind)}
+                                        title={formatMessage(ACTIVITY_KIND_LABELS[kind])}
                                         onClick={() => setKindFilters((prev) => ({...prev, [kind]: !(prev[kind] !== false)}))}
                                     >
-                                        <i className={`icon ${ACTIVITY_KIND_ICONS[kind]}`} aria-hidden='true'/>
+                                        <i
+                                            className={`icon ${ACTIVITY_KIND_ICONS[kind]}`}
+                                            aria-hidden='true'
+                                        />
                                     </button>
                                 );
                             })}
                         </div>
                         <label
                             className='desktop-activity-highlight-filter'
-                            title='Show only important activity'
+                            title={formatMessage({id: 'activity.filters.importantTooltip', defaultMessage: 'Show only important activity'})}
                         >
                             <input
                                 type='checkbox'
@@ -639,7 +684,10 @@ export default function ActivityView() {
                                 onChange={() => setHighlightedOnlyFilter((prev) => !prev)}
                             />
                             <span className='desktop-activity-highlight-filter-label'>
-                                {'Important'}
+                                <FormattedMessage
+                                    id='activity.filters.important'
+                                    defaultMessage='Important'
+                                />
                             </span>
                         </label>
                     </div>
@@ -653,12 +701,18 @@ export default function ActivityView() {
                     ) : null}
                     {loading && !filteredItems.length ? (
                         <div className='desktop-activity-loading'>
-                            {'Loading...'}
+                            <FormattedMessage
+                                id='activity.loading'
+                                defaultMessage='Loading...'
+                            />
                         </div>
                     ) : null}
                     {!loading && !error && !filteredItems.length ? (
                         <div className='desktop-activity-empty'>
-                            {'No activity yet'}
+                            <FormattedMessage
+                                id='activity.empty'
+                                defaultMessage='No activity yet'
+                            />
                         </div>
                     ) : null}
 
@@ -672,14 +726,20 @@ export default function ActivityView() {
                                 disabled={loading || !canLoad}
                                 onClick={loadOlder}
                             >
-                                {'Load more'}
+                                <FormattedMessage
+                                    id='activity.loadMore'
+                                    defaultMessage='Load more'
+                                />
                             </button>
                         </div>
                     ) : null}
 
                     {loading && filteredItems.length ? (
                         <div className='desktop-activity-loading'>
-                            {'Loading...'}
+                            <FormattedMessage
+                                id='activity.loading'
+                                defaultMessage='Loading...'
+                            />
                         </div>
                     ) : null}
                 </div>

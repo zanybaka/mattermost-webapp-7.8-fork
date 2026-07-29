@@ -1,12 +1,12 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
 import {fetchJSON, fetchJSONCached, getUserAvatarURL, postJSON} from '../api';
 import {getCurrentUserUsername, replaceMentionUsernamesWithDisplayNames} from '../mentionDisplay';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
 type UserRecord = {
     id: string;
@@ -98,7 +98,7 @@ function buildMentionSearchTerms(user: UserRecord): string {
     return uniqueKeys.map((key) => `"${key}"`).join(' ');
 }
 
-async function getTeamIds(serverId: string): Promise<string[]> {
+async function getTeamIds(): Promise<string[]> {
     const response = await fetchJSON('/api/v4/users/me/teams');
     if (!response.ok || !Array.isArray(response.data)) {
         return [];
@@ -141,7 +141,7 @@ async function searchMentionPosts(
         return {posts: [], error: globalResponse.error};
     }
 
-    const teamIds = await getTeamIds(params.serverId);
+    const teamIds = await getTeamIds();
     const postsById = new Map<string, Record<string, unknown>>();
     const responses = await Promise.all(teamIds.map((teamId) => (
         postJSON(
@@ -231,7 +231,7 @@ async function searchFallbackMentionPosts(
     };
 }
 
-async function loadChannelsById(serverId: string): Promise<Map<string, ChannelRecord>> {
+async function loadChannelsById(): Promise<Map<string, ChannelRecord>> {
     const channelsById = new Map<string, ChannelRecord>();
     const channelsResponse = await fetchJSONCached('/api/v4/users/me/channels');
     if (!channelsResponse.ok || !Array.isArray(channelsResponse.data)) {
@@ -382,7 +382,7 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
         return {items: [], matchedPosts: 0, error};
     }
 
-    const channelsById = await loadChannelsById(params.serverId);
+    const channelsById = await loadChannelsById();
     const actorIds = Array.from(new Set(posts.map((post) => String(post.user_id || '')).filter(Boolean)));
     const userMap = new Map<string, UserRecord>();
     const mentionNameCache = new Map<string, string | null>();

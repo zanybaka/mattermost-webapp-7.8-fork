@@ -1,11 +1,11 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
 import {fetchJSON} from '../api';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
 const remindersUnsupportedServers = new Set<string>();
 

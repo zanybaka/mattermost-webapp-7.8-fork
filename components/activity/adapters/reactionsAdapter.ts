@@ -1,12 +1,12 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
 import {fetchJSON, fetchJSONCached, getEmojiImageURL, getUserAvatarURL, postJSON} from '../api';
 import {getCurrentUserUsername} from '../mentionDisplay';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
 const MAX_SEARCH_PAGES = 10;
 const SEARCH_PER_PAGE = 100;
@@ -54,7 +54,7 @@ function formatSearchAfterDate(sinceMs: number): string {
     return `${year}-${month}-${day}`;
 }
 
-async function getTeamIds(serverId: string): Promise<string[]> {
+async function getTeamIds(): Promise<string[]> {
     const response = await fetchJSON('/api/v4/users/me/teams');
     if (!response.ok || !Array.isArray(response.data)) {
         return [];
@@ -85,7 +85,7 @@ async function searchOwnPostsPage(
         return {posts: getPostsFromPayload(globalResponse.data)};
     }
 
-    const teamIds = await getTeamIds(params.serverId);
+    const teamIds = await getTeamIds();
     const postsById = new Map<string, Record<string, unknown>>();
     const responses = await Promise.all(teamIds.map((teamId) => (
         postJSON(

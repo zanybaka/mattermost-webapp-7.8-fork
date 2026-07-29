@@ -1,9 +1,9 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import type {Options} from '@mattermost/types/client4';
-
 import {Client4} from 'mattermost-redux/client';
+
+import type {Options} from '@mattermost/types/client4';
 
 const RESPONSE_CACHE_TTL_MS = 1000 * 60 * 10;
 const REQUEST_TIMEOUT_MS = 15000;

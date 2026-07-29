@@ -1,7 +1,11 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 // Ported from Mattermost Desktop Activity panel injection (externalAPI.ts).
+
+import type {MessageDescriptor} from 'react-intl';
+
+import {t} from 'utils/i18n';
 
 import type {ActivityEventKind, ActivityItem} from './types';
 
@@ -15,6 +19,20 @@ export const ACTIVITY_KIND_ICONS: Record<ActivityEventKind, string> = {
 };
 
 export const ACTIVITY_FILTER_KINDS = ['mention', 'thread_reply', 'reaction', 'dm', 'gm', 'reminder'] as const;
+
+export const ACTIVITY_KIND_LABELS: Record<ActivityEventKind, MessageDescriptor> = {
+    mention: {id: t('activity.kind.mention'), defaultMessage: 'Mention'},
+    thread_reply: {id: t('activity.kind.threadReply'), defaultMessage: 'Thread reply'},
+    reaction: {id: t('activity.kind.reaction'), defaultMessage: 'Reaction'},
+    dm: {id: t('activity.kind.dm'), defaultMessage: 'Direct message'},
+    gm: {id: t('activity.kind.gm'), defaultMessage: 'Group message'},
+    reminder: {id: t('activity.kind.reminder'), defaultMessage: 'Reminder'},
+};
+
+export const ACTIVITY_DAY_LABELS = {
+    today: {id: t('activity.day.today'), defaultMessage: 'Today'},
+    yesterday: {id: t('activity.day.yesterday'), defaultMessage: 'Yesterday'},
+};
 
 export function getActivityPanelItemId(item: ActivityItem): string {
     if (item.canonicalId) {
@@ -38,13 +56,6 @@ export function getActivityPanelItemId(item: ActivityItem): string {
     }
 
     return `${item.eventKind || 'event'}:ts:${String(item.eventTs || 0)}`;
-}
-
-function getActivityKindLabel(eventKind: string) {
-    return eventKind.
-        split('_').
-        map((part) => part.charAt(0).toUpperCase() + part.slice(1)).
-        join(' ');
 }
 
 export function formatActivityTime(ts: number) {
@@ -84,24 +95,24 @@ function toLocalDayKey(date: Date) {
     return `${year}-${month}-${day}`;
 }
 
-export function getActivityDayBadgeLabel(ts: number) {
+export function getActivityDayBadge(ts: number): {key: string; descriptor?: MessageDescriptor} {
     const date = new Date(ts);
     if (Number.isNaN(date.getTime())) {
-        return '';
+        return {key: ''};
     }
 
     const now = new Date();
     if (isSameLocalDay(date, now)) {
-        return 'Today';
+        return {key: 'today', descriptor: ACTIVITY_DAY_LABELS.today};
     }
 
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     if (isSameLocalDay(date, yesterday)) {
-        return 'Yesterday';
+        return {key: 'yesterday', descriptor: ACTIVITY_DAY_LABELS.yesterday};
     }
 
-    return toLocalDayKey(date);
+    return {key: toLocalDayKey(date)};
 }
 
 export function getActivityActorName(item: ActivityItem) {
@@ -145,19 +156,6 @@ export function getActivityMessage(item: ActivityItem, actorName: string) {
     return preview;
 }
 
-export function getActivityTitle(item: ActivityItem, actorName: string) {
-    if (actorName) {
-        return actorName;
-    }
-    if (item.eventKind === 'dm') {
-        return 'Direct message';
-    }
-    if (item.eventKind === 'gm') {
-        return 'Group message';
-    }
-    return getActivityKindLabel(item.eventKind);
-}
-
 export function isReminderLikeItem(item: ActivityItem, actorName: string) {
     if (item.eventKind === 'reminder' || Boolean(item.reminderId) || Boolean(item.sourceRef?.reminderId)) {
         return true;
@@ -191,9 +189,5 @@ export function isActivityHighlightedItem(item: ActivityItem) {
         return hasPersonalMention || hasBroadcastMention;
     }
     return false;
-}
-
-export function getActivityKindMetaTitle(eventKind: string) {
-    return getActivityKindLabel(eventKind);
 }
 

@@ -1,13 +1,13 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
 import {fetchJSON, getUserAvatarURL} from '../api';
 import {forEachWithConcurrency} from '../concurrency';
 import {getCurrentUserUsername} from '../mentionDisplay';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
 // Feature toggle: hide own DM/GM messages from Activity feed.
 const HIDE_MESSAGES_FROM_ME = true;
