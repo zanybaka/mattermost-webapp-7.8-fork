@@ -1,11 +1,17 @@
 // Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
+import type {Options} from '@mattermost/types/client4';
+
+import {Client4} from 'mattermost-redux/client';
+
 const RESPONSE_CACHE_TTL_MS = 1000 * 60 * 10;
 const REQUEST_TIMEOUT_MS = 15000;
+const MAX_CACHED_RESPONSES = 500;
 
 export type ActivityFetchResult = {
     ok: boolean;
+    status?: number;
     data?: unknown;
     error?: string;
 };
@@ -16,6 +22,15 @@ const inFlightRequests = new Map<string, Promise<ActivityFetchResult>>();
 function normalizePath(path: string) {
     const normalized = (path || '').trim();
     return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+function toAbsoluteUrl(path: string) {
+    return `${Client4.getUrl()}${path}`;
+}
+
+export function clearActivityResponseCache() {
+    responseCache.clear();
+    inFlightRequests.clear();
 }
 
 async function readJSONResponse(response: Response): Promise<ActivityFetchResult> {
@@ -32,32 +47,34 @@ async function readJSONResponse(response: Response): Promise<ActivityFetchResult
     if (!response.ok) {
         return {
             ok: false,
+            status: response.status,
             error: `request failed with status ${response.status}`,
         };
     }
 
     if (!raw) {
-        return {ok: true, data: null};
+        return {ok: true, status: response.status, data: null};
     }
 
     try {
-        return {ok: true, data: JSON.parse(raw)};
+        return {ok: true, status: response.status, data: JSON.parse(raw)};
     } catch (error) {
         return {
             ok: false,
+            status: response.status,
             error: error instanceof Error ? error.message : 'failed to parse response',
         };
     }
 }
 
-async function fetchWithTimeout(path: string, init: RequestInit): Promise<ActivityFetchResult> {
+async function fetchWithTimeout(path: string, init: Options): Promise<ActivityFetchResult> {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-        const response = await fetch(path, {
-            ...init,
-            credentials: 'include',
+        // Client4 supplies the auth, CSRF and X-Requested-With headers the server requires.
+        const response = await fetch(toAbsoluteUrl(path), {
+            ...Client4.getOptions(init) as RequestInit,
             signal: controller.signal,
         });
         return await readJSONResponse(response);
@@ -84,9 +101,6 @@ export async function fetchJSON(path: string): Promise<ActivityFetchResult> {
 export async function postJSON(path: string, body: unknown): Promise<ActivityFetchResult> {
     return fetchWithTimeout(normalizePath(path), {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
         body: JSON.stringify(body),
     });
 }
@@ -107,6 +121,12 @@ export async function fetchJSONCached(path: string, ttlMs = RESPONSE_CACHE_TTL_M
 
     const request = fetchJSON(normalizedPath).then((result) => {
         if (result.ok) {
+            if (responseCache.size >= MAX_CACHED_RESPONSES) {
+                const oldestKey = responseCache.keys().next().value;
+                if (oldestKey) {
+                    responseCache.delete(oldestKey);
+                }
+            }
             responseCache.set(normalizedPath, {
                 expiresAt: Date.now() + ttlMs,
                 value: result,
@@ -121,11 +141,11 @@ export async function fetchJSONCached(path: string, ttlMs = RESPONSE_CACHE_TTL_M
     return request;
 }
 
-export function getUserAvatarURL(userId: string): string {
-    return `/api/v4/users/${encodeURIComponent(userId)}/image`;
+export function getUserAvatarURL(userId: string, lastPictureUpdate = 0): string {
+    return Client4.getProfilePictureUrl(userId, lastPictureUpdate);
 }
 
 export function getEmojiImageURL(emojiId: string): string {
-    return `/api/v4/emoji/${encodeURIComponent(emojiId)}/image`;
+    return Client4.getCustomEmojiImageUrl(emojiId);
 }
 
