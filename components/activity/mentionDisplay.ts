@@ -1,6 +1,7 @@
 // Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
+import {stripMarkdownSyntax} from './activityMarkdown';
 import {fetchJSONCached} from './api';
 
 type UserRecord = {
@@ -47,7 +48,7 @@ async function resolveDisplayNameByUsername(serverId: string, username: string):
         return null;
     }
 
-    const displayName = formatUserDisplayName(response.data as UserRecord).trim();
+    const displayName = stripMarkdownSyntax(formatUserDisplayName(response.data as UserRecord));
     return displayName || null;
 }
 

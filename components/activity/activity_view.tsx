@@ -16,6 +16,7 @@ import {getHistory} from 'utils/browser_history';
 import activityAggregationService from './aggregationService';
 import type {ActivityLoadContext} from './interfaces';
 import type {ActivityItem, ActivityPage, ActivityEventKind} from './types';
+import ActivityReactionMessage from './activity_reaction_message';
 import {renderActivityMarkdown} from './activityMarkdown';
 import {
     ACTIVITY_FILTER_KINDS,
@@ -28,7 +29,6 @@ import {
     getActivityMessage,
     getActivityPanelItemId,
     getActivityTitle,
-    getReactionMessageHtml,
     isActivityHighlightedItem,
     isReminderLikeItem,
 } from './activityDisplay';
@@ -47,8 +47,10 @@ type PersistedActivityFilters = {
     hideMentionReactionItems?: boolean;
 };
 
-function getHiddenActivityStorageKey(serverId?: string) {
-    return `${ACTIVITY_HIDDEN_ITEMS_STORAGE_KEY_PREFIX}:${(serverId || 'global').trim() || 'global'}`;
+function getHiddenActivityStorageKey(serverId: string, userId: string) {
+    const server = (serverId || 'global').trim() || 'global';
+    const user = (userId || 'anonymous').trim() || 'anonymous';
+    return `${ACTIVITY_HIDDEN_ITEMS_STORAGE_KEY_PREFIX}:${server}:${user}`;
 }
 
 function setSidebarSectionVisibilityByPath(pathFragment: string, hidden: boolean) {
@@ -126,15 +128,15 @@ export default function ActivityView() {
 
     const persistHiddenActivityItemIds = useCallback((next: Set<string>) => {
         try {
-            window.localStorage.setItem(getHiddenActivityStorageKey(teamId), JSON.stringify(Array.from(next)));
+            window.localStorage.setItem(getHiddenActivityStorageKey(teamId, userId), JSON.stringify(Array.from(next)));
         } catch {
             // ignore persistence errors
         }
-    }, [teamId]);
+    }, [teamId, userId]);
 
     const hydrateHiddenActivityItemIdsFromStorage = useCallback(() => {
         try {
-            const raw = window.localStorage.getItem(getHiddenActivityStorageKey(teamId));
+            const raw = window.localStorage.getItem(getHiddenActivityStorageKey(teamId, userId));
             if (!raw) {
                 setHiddenItemIds(new Set());
                 return;
@@ -150,7 +152,7 @@ export default function ActivityView() {
         } catch {
             setHiddenItemIds(new Set());
         }
-    }, [teamId]);
+    }, [teamId, userId]);
 
     const hydrateActivityFiltersFromStorage = useCallback(() => {
         try {
@@ -207,7 +209,7 @@ export default function ActivityView() {
         if (!userId || loading) {
             return;
         }
-        const state = activityAggregationService.getState(context.serverId);
+        const state = activityAggregationService.getState(context.serverId, context.userId);
         if (!state) {
             return;
         }
@@ -231,7 +233,7 @@ export default function ActivityView() {
         setLoading(true);
         setError('');
         try {
-            const state = activityAggregationService.getState(context.serverId) || undefined;
+            const state = activityAggregationService.getState(context.serverId, context.userId) || undefined;
             const page = await activityAggregationService.refresh(context, state) as ActivityPage;
             setItems(page.items || []);
             setHasMore(page.hasMore !== false);
@@ -255,7 +257,7 @@ export default function ActivityView() {
         setLoading(true);
         setError('');
         try {
-            const state = activityAggregationService.getState(context.serverId);
+            const state = activityAggregationService.getState(context.serverId, context.userId);
             const baseItems = state?.items || items;
             const result = activityAggregationService.searchLocal(trimmed, baseItems);
             setItems(Array.isArray(result) ? result : []);
@@ -265,7 +267,7 @@ export default function ActivityView() {
         } finally {
             setLoading(false);
         }
-    }, [context.serverId, items, refresh, userId]);
+    }, [context.serverId, context.userId, items, refresh, userId]);
 
     const hideItem = useCallback((itemId: string) => {
         setHiddenItemIds((prev) => {
@@ -363,9 +365,7 @@ export default function ActivityView() {
             const avatarVisible = loadedAvatarKeys.has(avatarKey);
             const avatarFailed = failedAvatarKeys.has(avatarKey);
 
-            const renderedBody = item.eventKind === 'reaction' ?
-                getReactionMessageHtml(item, message || item.previewText || '(no preview)') :
-                renderActivityMarkdown(message || item.previewText || '(no preview)');
+            const fallbackBodyText = message || item.previewText || '(no preview)';
 
             elements.push(
                 <div
@@ -457,11 +457,19 @@ export default function ActivityView() {
                                     </button>
                                 </span>
                             </div>
-                            <div
-                                className='desktop-activity-message'
-                                // eslint-disable-next-line react/no-danger
-                                dangerouslySetInnerHTML={{__html: renderedBody}}
-                            />
+                            {item.eventKind === 'reaction' ? (
+                                <ActivityReactionMessage
+                                    item={item}
+                                    fallbackText={fallbackBodyText}
+                                />
+                            ) : (
+                                <div
+                                    className='desktop-activity-message'
+
+                                    // eslint-disable-next-line react/no-danger
+                                    dangerouslySetInnerHTML={{__html: renderActivityMarkdown(fallbackBodyText)}}
+                                />
+                            )}
                         </div>
                     </div>
                 </div>,

@@ -27,9 +27,22 @@ type AdapterCursorMap = Partial<Record<ActivityEventKind, string>>;
 
 const STORAGE_KEY_PREFIX = 'mm-webapp-activity-state';
 
-function getStorageKey(serverId: string) {
-    const normalized = (serverId || '').trim() || 'global';
-    return `${STORAGE_KEY_PREFIX}:${normalized}`;
+// Activity previews contain message content, so persisted state is scoped to the user it
+// was fetched for — otherwise the next account signing in on the same browser would
+// hydrate the previous account's mentions and DM previews.
+function getStorageKey(serverId: string, userId: string) {
+    const normalizedServer = (serverId || '').trim() || 'global';
+    const normalizedUser = (userId || '').trim() || 'anonymous';
+    return `${STORAGE_KEY_PREFIX}:${normalizedServer}:${normalizedUser}`;
+}
+
+// Pre-scoping builds stored previews under a user-independent key; drop it on load.
+function removeLegacyStorage(serverId: string) {
+    try {
+        window.localStorage.removeItem(`${STORAGE_KEY_PREFIX}:${(serverId || '').trim() || 'global'}`);
+    } catch {
+        // ignore storage errors
+    }
 }
 
 function parsePage(cursor?: string): number {
@@ -55,6 +68,7 @@ function resolveVisibleSince(mode: 'initial' | 'older', nowMs: number, state?: P
 function toPersistedState(context: ActivityLoadContext, page: ActivityPage, allItems = page.items): PersistedActivityState {
     return {
         serverId: context.serverId,
+        userId: context.userId,
         fetchedAt: Date.now(),
         uiCursor: page.uiCursor,
         sourceCursors: page.sourceCursors,
@@ -78,13 +92,27 @@ function toPersistedState(context: ActivityLoadContext, page: ActivityPage, allI
     };
 }
 
-function loadFromLocalStorage(serverId: string): PersistedActivityState | null {
+function loadFromLocalStorage(serverId: string, userId: string): PersistedActivityState | null {
+    removeLegacyStorage(serverId);
+
     try {
-        const raw = window.localStorage.getItem(getStorageKey(serverId));
+        const raw = window.localStorage.getItem(getStorageKey(serverId, userId));
         if (!raw) {
             return null;
         }
-        return deserializePersistedActivityState(raw);
+
+        const state = deserializePersistedActivityState(raw);
+        if (!state) {
+            return null;
+        }
+
+        const persistedUserId = (state.userId || '').trim();
+        if (persistedUserId !== ((userId || '').trim())) {
+            window.localStorage.removeItem(getStorageKey(serverId, userId));
+            return null;
+        }
+
+        return state;
     } catch {
         return null;
     }
@@ -92,7 +120,7 @@ function loadFromLocalStorage(serverId: string): PersistedActivityState | null {
 
 function saveToLocalStorage(state: PersistedActivityState) {
     try {
-        window.localStorage.setItem(getStorageKey(state.serverId), serializePersistedActivityState(state));
+        window.localStorage.setItem(getStorageKey(state.serverId, state.userId), serializePersistedActivityState(state));
     } catch {
         // Keep Activity usable even when storage is unavailable.
     }
@@ -126,15 +154,16 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
         };
     };
 
-    getState = (serverId: string): PersistedActivityState | null => {
-        const memoryState = this.memoryState.get(serverId);
+    getState = (serverId: string, userId: string): PersistedActivityState | null => {
+        const stateKey = getStorageKey(serverId, userId);
+        const memoryState = this.memoryState.get(stateKey);
         if (memoryState) {
             return memoryState;
         }
 
-        const diskState = loadFromLocalStorage(serverId);
+        const diskState = loadFromLocalStorage(serverId, userId);
         if (diskState) {
-            this.memoryState.set(serverId, diskState);
+            this.memoryState.set(stateKey, diskState);
         }
         return diskState;
     };
@@ -253,7 +282,7 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
     loadInitial = async (context: ActivityLoadContext): Promise<ActivityPage> => {
         const result = await this.fetchAdapters(context, 'initial');
         const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(context.serverId, persisted);
+        this.memoryState.set(getStorageKey(context.serverId, context.userId), persisted);
         saveToLocalStorage(persisted);
         return result.page;
     };
@@ -261,7 +290,7 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
     loadOlder = async (context: ActivityLoadContext, state: PersistedActivityState): Promise<ActivityPage> => {
         const result = await this.fetchAdapters(context, 'older', state);
         const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(context.serverId, persisted);
+        this.memoryState.set(getStorageKey(context.serverId, context.userId), persisted);
         saveToLocalStorage(persisted);
         return result.page;
     };
@@ -269,7 +298,7 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
     refresh = async (context: ActivityLoadContext, state?: PersistedActivityState): Promise<ActivityPage> => {
         const result = await this.fetchAdapters(context, 'initial', state);
         const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(context.serverId, persisted);
+        this.memoryState.set(getStorageKey(context.serverId, context.userId), persisted);
         saveToLocalStorage(persisted);
         return result.page;
     };

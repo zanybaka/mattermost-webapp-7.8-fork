@@ -4,12 +4,33 @@
 // Ported from Mattermost Desktop Activity panel injection (externalAPI.ts).
 
 export function escapeHtml(value: string) {
-    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return value.
+        replace(/&/g, '&amp;').
+        replace(/</g, '&lt;').
+        replace(/>/g, '&gt;').
+        replace(/"/g, '&quot;').
+        replace(/'/g, '&#39;');
+}
+
+// Drops markdown metacharacters so text taken from other users (display names) cannot
+// inject links or emphasis when it is substituted into text that is rendered as markdown.
+// The renderer has no backslash-escape syntax, so the characters are removed, not escaped.
+export function stripMarkdownSyntax(value: string) {
+    return value.replace(/[\\`*_~[\]()|\r\n]/g, '').trim();
+}
+
+function isProtocolRelative(url: string) {
+    // Browsers treat both `//host` and `/\host` as protocol-relative, i.e. cross-origin.
+    return (/^[/\\]{2}/).test(url);
 }
 
 export function sanitizeActivityLinkUrl(url: string) {
     const trimmed = url.trim();
     if (!trimmed) {
+        return '';
+    }
+
+    if (isProtocolRelative(trimmed)) {
         return '';
     }
 

@@ -33,6 +33,7 @@ export function deserializePersistedActivityState(raw: string): PersistedActivit
 
         return {
             serverId: payload.serverId,
+            userId: payload.userId || '',
             fetchedAt: payload.fetchedAt,
             uiCursor: payload.uiCursor,
             sourceCursors: payload.sourceCursors || {},
