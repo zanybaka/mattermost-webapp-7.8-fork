@@ -14,6 +14,8 @@ jest.mock('../api', () => ({
 
 jest.mock('../mentionDisplay', () => ({
     getCurrentUserUsername: jest.fn(),
+    hasBroadcastMention: jest.requireActual('../mentionDisplay').hasBroadcastMention,
+    hasPersonalMention: jest.requireActual('../mentionDisplay').hasPersonalMention,
 }));
 
 const fetchJSONMock = fetchJSON as jest.MockedFunction<typeof fetchJSON>;

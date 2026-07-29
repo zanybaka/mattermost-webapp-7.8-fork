@@ -1,13 +1,16 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
+import type {ChannelRecord, PostRecord, UserRecord} from '../records';
+import {formatUserDisplayName, getPostsFromPayload, toRecordArray} from '../records';
 import {fetchJSON, getUserAvatarURL} from '../api';
 import {forEachWithConcurrency} from '../concurrency';
-import {getCurrentUserUsername} from '../mentionDisplay';
+import {getCurrentUserUsername, hasBroadcastMention, hasPersonalMention} from '../mentionDisplay';
+
+import {filterItemsByWindow} from './shared';
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
 // Feature toggle: hide own DM/GM messages from Activity feed.
 const HIDE_MESSAGES_FROM_ME = true;
@@ -18,29 +21,7 @@ const HIDDEN_DM_SYSTEM_MESSAGE_PATTERNS = [
     /\bmarked\b.*\bas complete\b/i,
 ];
 
-type ChannelRecord = {
-    id: string;
-    type: string;
-    display_name?: string;
-    name?: string;
-    update_at?: number;
-    last_post_at?: number;
-};
-
-type UserRecord = {
-    id: string;
-    username?: string;
-    first_name?: string;
-    last_name?: string;
-};
-
-type PostRecord = {
-    id: string;
-    user_id?: string;
-    message?: string;
-    create_at?: number;
-    update_at?: number;
-};
+type DirectChannelRecord = ChannelRecord & {type: string};
 
 function normalizeMessageForComparison(message: string): string {
     return message.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -55,7 +36,7 @@ function isHiddenReminderCompletionDMMessage(post: PostRecord, channelType: stri
     return HIDDEN_DM_SYSTEM_MESSAGE_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
 }
 
-function getChannelActivityTs(channel: ChannelRecord): number {
+function getChannelActivityTs(channel: DirectChannelRecord): number {
     return Number(channel.last_post_at || channel.update_at || 0);
 }
 
@@ -63,26 +44,17 @@ function getPostActivityTs(post: PostRecord): number {
     return Number(post.create_at || post.update_at || 0);
 }
 
-function formatPersonName(user?: UserRecord): string {
-    if (!user) {
-        return '';
-    }
-
-    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    return fullName || user.username || '';
-}
-
 type NormalizedChannelPostActivityParams = {
     serverId: string;
     userId: string;
-    channel: ChannelRecord;
+    channel: DirectChannelRecord;
     kind: 'dm' | 'gm';
     post: PostRecord;
     actorName: string;
     participantNames: string[];
 };
 
-async function fetchUserById(serverId: string, userId: string, userCache: Map<string, Promise<UserRecord | null>>) {
+async function fetchUserById(userId: string, userCache: Map<string, Promise<UserRecord | null>>) {
     if (!userId) {
         return null;
     }
@@ -104,20 +76,21 @@ async function fetchUserById(serverId: string, userId: string, userCache: Map<st
     return request;
 }
 
-async function fetchChannelPosts(serverId: string, channelId: string, page: number, perPage: number) {
+async function fetchChannelPosts(
+    channelId: string,
+    page: number,
+    perPage: number,
+): Promise<{posts: PostRecord[]; error?: string}> {
     const response = await fetchJSON(`/api/v4/channels/${encodeURIComponent(channelId)}/posts?page=${page}&per_page=${perPage}`);
     if (!response.ok) {
-        return [];
+        return {posts: [], error: response.error};
     }
 
-    const typed = response.data as Record<string, unknown>;
-    const order = Array.isArray(typed?.order) ? typed.order.map(String) : [];
-    const posts = (typed?.posts || {}) as Record<string, unknown>;
-    return order.
-        map((id) => posts[id]).
-        filter((post): post is PostRecord => Boolean(post && typeof post === 'object')).
-        map((post) => ({...post, id: String(post.id || '')})).
-        filter((post) => Boolean(post.id));
+    return {
+        posts: getPostsFromPayload(response.data).
+            map((post) => ({...post, id: String(post.id || '')} as PostRecord)).
+            filter((post) => Boolean(post.id)),
+    };
 }
 
 function normalizeChannelPostActivity({
@@ -178,10 +151,8 @@ export class DMGMAdapter implements ActivitySourceAdapter {
             return {kind: this.kind, items: [], error: response.error};
         }
 
-        const channels = Array.isArray(response.data) ? response.data : [];
-        const records = channels.filter((channel): channel is ChannelRecord => {
-            return Boolean(channel && typeof channel === 'object' && (channel as ChannelRecord).id && (channel as ChannelRecord).type);
-        }).
+        const records = toRecordArray(response.data).
+            filter((channel): channel is DirectChannelRecord => Boolean(channel.id && channel.type)).
             filter((channel) => channel.type === 'D' || channel.type === 'G').
             filter((channel) => getChannelActivityTs(channel) >= params.sinceMs).
             sort((a, b) => getChannelActivityTs(b) - getChannelActivityTs(a)).
@@ -189,13 +160,16 @@ export class DMGMAdapter implements ActivitySourceAdapter {
 
         const userCache = new Map<string, Promise<UserRecord | null>>();
         const selfUsername = await getCurrentUserUsername(params.serverId, params.userId);
-        const normalizedSelfUsername = selfUsername.toLowerCase();
         const items = [] as ActivityItem[];
         let hasMore = false;
+        let firstChannelError: string | undefined;
 
         await forEachWithConcurrency(records, DM_GM_FETCH_CONCURRENCY, async (channel) => {
             const postsPerChannel = Math.min(params.pageSize, MAX_DM_GM_POSTS_PER_CHANNEL);
-            const posts = await fetchChannelPosts(params.serverId, channel.id, params.page, postsPerChannel);
+            const {posts, error} = await fetchChannelPosts(channel.id, params.page, postsPerChannel);
+            if (error && !firstChannelError) {
+                firstChannelError = error;
+            }
             if (posts.length >= postsPerChannel) {
                 hasMore = true;
             }
@@ -210,8 +184,8 @@ export class DMGMAdapter implements ActivitySourceAdapter {
             }
 
             await Promise.all(relevantPosts.map(async (post) => {
-                const actor = post.user_id ? await fetchUserById(params.serverId, post.user_id, userCache) : null;
-                const actorName = formatPersonName(actor || undefined);
+                const actor = post.user_id ? await fetchUserById(post.user_id, userCache) : null;
+                const actorName = formatUserDisplayName(actor || undefined);
                 const message = post.message || '';
                 const normalizedItem = normalizeChannelPostActivity({
                     serverId: params.serverId,
@@ -224,20 +198,21 @@ export class DMGMAdapter implements ActivitySourceAdapter {
                 });
                 normalizedItem.sourceRef = {
                     ...(normalizedItem.sourceRef || {}),
-                    personalMention: normalizedSelfUsername && message.toLowerCase().includes(`@${normalizedSelfUsername}`) ? 'true' : '',
-                    broadcastMention: (/(^|[\s(])@(here|all|channel)\b/i).test(message) ? 'true' : '',
+                    personalMention: hasPersonalMention(message, selfUsername) ? 'true' : '',
+                    broadcastMention: hasBroadcastMention(message) ? 'true' : '',
                 };
                 items.push(normalizedItem);
             }));
         });
 
-        const filteredItems = items.
-            filter((item) => item.eventTs >= params.sinceMs).
-            filter((item) => !params.beforeMs || item.eventTs < params.beforeMs);
+        const filteredItems = filterItemsByWindow(items, params);
 
         return {
             kind: this.kind,
             items: filteredItems,
+
+            // Per-channel failures still surface so the feed can flag incomplete data.
+            error: firstChannelError,
             nextCursor: hasMore ? String(params.page + 1) : undefined,
         };
     }

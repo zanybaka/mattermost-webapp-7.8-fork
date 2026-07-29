@@ -1,4 +1,4 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import {dedupeActivityItems, withCanonicalId} from './canonical';
@@ -6,6 +6,7 @@ import type {ActivityAggregationService as ActivityAggregationServiceContract, A
 import {mergeActivityItems} from './merge';
 import type {ActivityEventKind, ActivityItem, ActivityPage, PersistedActivityState} from './types';
 import {deserializePersistedActivityState, serializePersistedActivityState} from './persistence';
+import {logActivityError, toErrorMessage} from './errors';
 
 import {getUserAvatarURL} from './api';
 import {DMGMAdapter} from './adapters/dmGmAdapter';
@@ -113,7 +114,8 @@ function loadFromLocalStorage(serverId: string, userId: string): PersistedActivi
         }
 
         return state;
-    } catch {
+    } catch (error) {
+        logActivityError('failed to read persisted state', error);
         return null;
     }
 }
@@ -121,8 +123,9 @@ function loadFromLocalStorage(serverId: string, userId: string): PersistedActivi
 function saveToLocalStorage(state: PersistedActivityState) {
     try {
         window.localStorage.setItem(getStorageKey(state.serverId, state.userId), serializePersistedActivityState(state));
-    } catch {
+    } catch (error) {
         // Keep Activity usable even when storage is unavailable.
+        logActivityError('failed to persist state', error);
     }
 }
 
@@ -191,14 +194,27 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
             const runs = adapters.map(async (adapter) => {
                 const cursor = cursorMap[adapter.kind];
                 const page = parsePage(cursor);
-                const result = await adapter.fetch({
-                    serverId: context.serverId,
-                    userId: context.userId,
-                    pageSize,
-                    page,
-                    sinceMs,
-                    beforeMs,
-                });
+
+                let result;
+                try {
+                    result = await adapter.fetch({
+                        serverId: context.serverId,
+                        userId: context.userId,
+                        pageSize,
+                        page,
+                        sinceMs,
+                        beforeMs,
+                    });
+                } catch (error) {
+                    // A throwing adapter must not blank the whole feed.
+                    logActivityError(`adapter ${adapter.kind} failed`, error);
+                    errors.push({
+                        source: adapter.kind,
+                        message: toErrorMessage(error, `${adapter.kind} source failed`),
+                        retriable: true,
+                    });
+                    return [];
+                }
 
                 if (result.nextCursor) {
                     nextCursorMap[adapter.kind] = result.nextCursor;
@@ -279,28 +295,28 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
         };
     };
 
-    loadInitial = async (context: ActivityLoadContext): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'initial');
+    private loadAndPersist = async (
+        context: ActivityLoadContext,
+        mode: 'initial' | 'older',
+        state?: PersistedActivityState,
+    ): Promise<ActivityPage> => {
+        const result = await this.fetchAdapters(context, mode, state);
         const persisted = toPersistedState(context, result.page, result.allItems);
         this.memoryState.set(getStorageKey(context.serverId, context.userId), persisted);
         saveToLocalStorage(persisted);
         return result.page;
     };
 
-    loadOlder = async (context: ActivityLoadContext, state: PersistedActivityState): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'older', state);
-        const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(getStorageKey(context.serverId, context.userId), persisted);
-        saveToLocalStorage(persisted);
-        return result.page;
+    loadInitial = (context: ActivityLoadContext): Promise<ActivityPage> => {
+        return this.loadAndPersist(context, 'initial');
     };
 
-    refresh = async (context: ActivityLoadContext, state?: PersistedActivityState): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'initial', state);
-        const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(getStorageKey(context.serverId, context.userId), persisted);
-        saveToLocalStorage(persisted);
-        return result.page;
+    loadOlder = (context: ActivityLoadContext, state: PersistedActivityState): Promise<ActivityPage> => {
+        return this.loadAndPersist(context, 'older', state);
+    };
+
+    refresh = (context: ActivityLoadContext, state?: PersistedActivityState): Promise<ActivityPage> => {
+        return this.loadAndPersist(context, 'initial', state);
     };
 
     searchLocal = (query: string, items: ActivityItem[]): ActivityItem[] => {

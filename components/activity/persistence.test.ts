@@ -33,8 +33,13 @@ describe('activity persistence', () => {
         expect(deserializePersistedActivityState(unsupported)).toBeNull();
     });
 
-    test('returns null for malformed payload', () => {
+    test('returns null and warns for malformed payload', () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
         expect(deserializePersistedActivityState('not-json')).toBeNull();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('failed to parse persisted state'));
+
+        warn.mockRestore();
     });
 });
 

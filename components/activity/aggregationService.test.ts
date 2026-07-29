@@ -198,10 +198,14 @@ describe('ActivityAggregationService', () => {
         expect(reloaded.getState('server-1', 'user-2')).toBeNull();
     });
 
-    test('getState returns null when the stored payload is corrupt', () => {
+    test('getState returns null and warns when the stored payload is corrupt', () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
         window.localStorage.setItem('mm-webapp-activity-state:server-1:user-1', 'not-json');
 
         expect(new ActivityAggregationService().getState('server-1', 'user-1')).toBeNull();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('failed to parse persisted state'));
+
+        warn.mockRestore();
     });
 
     test('searchLocal hydrates avatars and filters by query', () => {

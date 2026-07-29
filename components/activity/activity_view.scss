@@ -589,3 +589,9 @@
 .desktop-activity-error {
     color: var(--error-text, #d24b4e);
 }
+
+.desktop-activity-source-errors {
+    padding: 8px 16px;
+    color: var(--away-indicator, #ffbc1f);
+    font-size: 12px;
+}

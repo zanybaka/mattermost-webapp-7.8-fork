@@ -2,6 +2,7 @@
 // See LICENSE.txt for license information.
 
 import type {PersistedActivityState} from './types';
+import {logActivityError} from './errors';
 
 export const ACTIVITY_PERSISTENCE_VERSION = 1;
 
@@ -40,7 +41,8 @@ export function deserializePersistedActivityState(raw: string): PersistedActivit
             checkpoint: payload.checkpoint || {watermarkTs: 0, mergeSequence: 0},
             items: payload.items || [],
         };
-    } catch {
+    } catch (error) {
+        logActivityError('failed to parse persisted state', error);
         return null;
     }
 }
