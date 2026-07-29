@@ -7,6 +7,9 @@ import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from
 
 import {getCurrentUserUsername, replaceMentionUsernamesWithDisplayNames} from '../mentionDisplay';
 import {fetchJSON, fetchJSONCached, getUserAvatarURL} from '../api';
+import {forEachWithConcurrency} from '../concurrency';
+
+const THREAD_FETCH_CONCURRENCY = 4;
 
 type UserRecord = {
     id: string;
@@ -185,34 +188,33 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
     async fetch(params: AdapterFetchParams): Promise<AdapterFetchResult> {
         const teamIds = await getTeamIds(params.serverId);
         const query = `deleted=false&page=${params.page}&per_page=${params.pageSize}&totalsOnly=false&extended=true&skipTotal=true&disable_channel_type_group=true`;
-        const baseEndpoints = [
-            `/api/v4/users/me/teams/threads?page=${params.page}&per_page=${params.pageSize}&extended=true`,
-        ];
-        const teamScopedEndpoints = teamIds.flatMap((teamId) => {
-            const encodedTeamId = encodeURIComponent(teamId);
-            const meEndpoint = `/api/v4/users/me/teams/${encodedTeamId}/threads?${query}`;
-            const userEndpoint = params.userId ? `/api/v4/users/${encodeURIComponent(params.userId)}/teams/${encodedTeamId}/threads?${query}` : '';
-            return [userEndpoint, meEndpoint].filter(Boolean);
-        });
-        const endpoints = [...baseEndpoints, ...teamScopedEndpoints];
+        const userPath = params.userId ? encodeURIComponent(params.userId) : 'me';
+        const endpoints = teamIds.length ? teamIds.map((teamId) => (
+            `/api/v4/users/${userPath}/teams/${encodeURIComponent(teamId)}/threads?${query}`
+        )) : [`/api/v4/users/me/teams/threads?page=${params.page}&per_page=${params.pageSize}&extended=true`];
 
-        let collected: Array<Record<string, unknown>> = [];
+        const threadsById = new Map<string, Record<string, unknown>>();
         let lastError = '';
+        let hasFullPage = false;
 
-        for (const endpoint of endpoints) {
-            // eslint-disable-next-line no-await-in-loop
+        await forEachWithConcurrency(endpoints, THREAD_FETCH_CONCURRENCY, async (endpoint) => {
             const response = await fetchJSON(endpoint);
             if (!response.ok) {
                 lastError = response.error || lastError;
-                continue;
+                return;
             }
 
             const threads = extractThreads(response.data);
-            if (threads.length) {
-                collected = collected.concat(threads);
+            if (threads.length >= params.pageSize) {
+                hasFullPage = true;
             }
-        }
+            threads.forEach((thread, index) => {
+                const threadId = String(thread.id || thread.post_id || `${endpoint}:${index}`);
+                threadsById.set(threadId, thread);
+            });
+        });
 
+        const collected = Array.from(threadsById.values());
         if (!collected.length && lastError) {
             return {kind: this.kind, items: [], error: lastError};
         }
@@ -283,7 +285,10 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
         return {
             kind: this.kind,
             items: filteredItems,
-            nextCursor: String(params.page + 1),
+
+            // Only page on when a source actually returned a full page, otherwise
+            // "load more" keeps polling exhausted endpoints forever.
+            nextCursor: hasFullPage ? String(params.page + 1) : undefined,
         };
     }
 }

@@ -9,8 +9,8 @@ import {fetchJSON} from '../api';
 
 const remindersUnsupportedServers = new Set<string>();
 
-function isNotFoundError(error?: string) {
-    return Boolean(error && error.includes('status 404'));
+function isNotFound(status?: number) {
+    return status === 404;
 }
 
 function normalizeReminder(serverId: string, userId: string, reminder: Record<string, unknown>): ActivityItem {
@@ -44,7 +44,7 @@ export class RemindersAdapter implements ActivitySourceAdapter {
         const endpoint = `/api/v4/users/me/reminders?page=${params.page}&per_page=${params.pageSize}`;
         const response = await fetchJSON(endpoint);
         if (!response.ok) {
-            if (isNotFoundError(response.error)) {
+            if (isNotFound(response.status)) {
                 remindersUnsupportedServers.add(params.serverId);
                 return {kind: this.kind, items: [], nextCursor: undefined};
             }
@@ -52,6 +52,7 @@ export class RemindersAdapter implements ActivitySourceAdapter {
         }
 
         const reminders = Array.isArray(response.data) ? response.data : [];
+        const hasFullPage = reminders.length >= params.pageSize;
         const items = reminders.
             filter((reminder): reminder is Record<string, unknown> => Boolean(reminder && typeof reminder === 'object')).
             map((reminder) => normalizeReminder(params.serverId, params.userId, reminder)).
@@ -61,7 +62,7 @@ export class RemindersAdapter implements ActivitySourceAdapter {
         return {
             kind: this.kind,
             items,
-            nextCursor: String(params.page + 1),
+            nextCursor: hasFullPage ? String(params.page + 1) : undefined,
         };
     }
 }

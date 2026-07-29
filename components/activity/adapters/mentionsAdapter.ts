@@ -355,9 +355,9 @@ async function mergeMentionSearchResults(
     };
 }
 
-async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: ActivityItem[]; error?: string}> {
+async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: ActivityItem[]; matchedPosts: number; error?: string}> {
     if (!params.userId) {
-        return {items: []};
+        return {items: [], matchedPosts: 0};
     }
 
     // Mattermost 7.8 / older search: search_mentions often returns personal hits but misses @all/@channel/@here.
@@ -379,7 +379,7 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
 
     const {posts, error} = searchResult;
     if (!posts.length) {
-        return {items: [], error};
+        return {items: [], matchedPosts: 0, error};
     }
 
     const channelsById = await loadChannelsById(params.serverId);
@@ -439,19 +439,22 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
         filter((item) => item.eventTs >= params.sinceMs).
         filter((item) => !params.beforeMs || item.eventTs < params.beforeMs);
 
-    return {items, error};
+    return {items, matchedPosts: posts.length, error};
 }
 
 export class MentionsAdapter implements ActivitySourceAdapter {
     kind: AdapterFetchResult['kind'] = 'mention';
 
     async fetch(params: AdapterFetchParams): Promise<AdapterFetchResult> {
-        const {items, error} = await fetchMentionPosts(params);
+        const {items, matchedPosts, error} = await fetchMentionPosts(params);
         const perPage = Math.max(10, Math.min(params.pageSize, 100));
         return {
             kind: this.kind,
             items,
-            nextCursor: items.length >= perPage ? String(params.page + 1) : undefined,
+
+            // Page on the number of posts the server matched, not the number left after
+            // local filtering, otherwise paging stops while the server still has hits.
+            nextCursor: matchedPosts >= perPage ? String(params.page + 1) : undefined,
             error,
         };
     }
