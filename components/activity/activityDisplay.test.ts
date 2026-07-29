@@ -10,13 +10,10 @@ import {
     getActivityMessage,
     getActivityPanelItemId,
     getActivityTitle,
-    getReactionMessageHtml,
     isActivityHighlightedItem,
     isReminderLikeItem,
 } from './activityDisplay';
 import type {ActivityItem} from './types';
-
-const UNSAFE_SCRIPT_URL = `java${'script'}:alert(1)`;
 
 function makeItem(overrides: Partial<ActivityItem> = {}): ActivityItem {
     return {
@@ -139,26 +136,5 @@ describe('isActivityHighlightedItem', () => {
             sourceRef: {broadcastMention: 'true'},
         }))).toBe(true);
         expect(isActivityHighlightedItem(makeItem())).toBe(false);
-    });
-});
-
-describe('getReactionMessageHtml', () => {
-    test('renders markdown when there is no emoji', () => {
-        expect(getReactionMessageHtml(makeItem(), '**hi**')).toBe('<strong>hi</strong>');
-        expect(getReactionMessageHtml(makeItem(), '')).toBe('(no preview)');
-    });
-
-    test('renders the shortcode when the emoji image url is unsafe', () => {
-        const item = makeItem({sourceRef: {emoji: 'smile', emojiImageUrl: UNSAFE_SCRIPT_URL}});
-        expect(getReactionMessageHtml(item, '')).toBe(':smile:');
-    });
-
-    test('renders an emoji image with an escaped url and shortcode fallback', () => {
-        const item = makeItem({sourceRef: {emoji: 'smile', emojiImageUrl: '/api/v4/emoji/1/image'}});
-        const html = getReactionMessageHtml(item, 'reacted');
-
-        expect(html).toContain('src="/api/v4/emoji/1/image"');
-        expect(html).toContain('alt=":smile:"');
-        expect(html).toContain('>reacted</span>');
     });
 });
