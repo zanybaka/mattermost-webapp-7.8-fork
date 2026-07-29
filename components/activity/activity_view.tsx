@@ -16,7 +16,7 @@ import {getHistory} from 'utils/browser_history';
 import activityAggregationService from './aggregationService';
 import type {ActivityLoadContext} from './interfaces';
 import type {ActivityItem, ActivityPage, ActivityEventKind} from './types';
-import {renderActivityMarkdown} from './activityMarkdown';
+import ActivityMessage from './activity_message';
 import {
     ACTIVITY_FILTER_KINDS,
     ACTIVITY_KIND_ICONS,
@@ -28,7 +28,6 @@ import {
     getActivityMessage,
     getActivityPanelItemId,
     getActivityTitle,
-    getReactionMessageHtml,
     isActivityHighlightedItem,
     isReminderLikeItem,
 } from './activityDisplay';
@@ -363,9 +362,7 @@ export default function ActivityView() {
             const avatarVisible = loadedAvatarKeys.has(avatarKey);
             const avatarFailed = failedAvatarKeys.has(avatarKey);
 
-            const renderedBody = item.eventKind === 'reaction' ?
-                getReactionMessageHtml(item, message || item.previewText || '(no preview)') :
-                renderActivityMarkdown(message || item.previewText || '(no preview)');
+            const messageText = message || item.previewText || '';
 
             elements.push(
                 <div
@@ -457,11 +454,12 @@ export default function ActivityView() {
                                     </button>
                                 </span>
                             </div>
-                            <div
-                                className='desktop-activity-message'
-                                // eslint-disable-next-line react/no-danger
-                                dangerouslySetInnerHTML={{__html: renderedBody}}
-                            />
+                            <div className='desktop-activity-message'>
+                                <ActivityMessage
+                                    item={item}
+                                    text={messageText}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>,

@@ -4,7 +4,6 @@
 // Ported from Mattermost Desktop Activity panel injection (externalAPI.ts).
 
 import type {ActivityEventKind, ActivityItem} from './types';
-import {escapeHtml, renderActivityMarkdown, sanitizeActivityLinkUrl} from './activityMarkdown';
 
 export const ACTIVITY_KIND_ICONS: Record<ActivityEventKind, string> = {
     mention: 'icon-at',
@@ -192,22 +191,6 @@ export function isActivityHighlightedItem(item: ActivityItem) {
         return hasPersonalMention || hasBroadcastMention;
     }
     return false;
-}
-
-export function getReactionMessageHtml(item: ActivityItem, fallbackText: string) {
-    const emojiName = (item.sourceRef?.emoji || '').trim();
-    if (!emojiName) {
-        return renderActivityMarkdown(fallbackText || '(no preview)');
-    }
-
-    const emojiShortcode = `:${emojiName}:`;
-    const fallbackLabel = fallbackText || emojiShortcode;
-    const emojiImageUrl = sanitizeActivityLinkUrl((item.sourceRef?.emojiImageUrl || '').trim());
-    if (!emojiImageUrl) {
-        return renderActivityMarkdown(fallbackLabel);
-    }
-
-    return `<span class="desktop-activity-reaction"><img class="desktop-activity-reaction-emoji" src="${escapeHtml(emojiImageUrl)}" alt="${escapeHtml(emojiShortcode)}" loading="lazy" onerror="this.style.display='none'; const fallback = this.nextElementSibling; if (fallback) { fallback.style.display = 'inline'; }"/><span class="desktop-activity-reaction-shortcode">${escapeHtml(fallbackLabel)}</span></span>`;
 }
 
 export function getActivityKindMetaTitle(eventKind: string) {
