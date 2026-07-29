@@ -7,6 +7,7 @@ import type {PersistedActivityState} from './types';
 function makeState(overrides: Partial<PersistedActivityState>): PersistedActivityState {
     return {
         serverId: 'server-1',
+        userId: 'user-1',
         fetchedAt: 123,
         sourceCursors: {},
         checkpoint: {watermarkTs: 0, mergeSequence: 0},

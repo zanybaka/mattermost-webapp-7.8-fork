@@ -46,6 +46,7 @@ export type ActivityPage = {
 
 export type PersistedActivityState = {
     serverId: string;
+    userId: string;
     fetchedAt: number;
     uiCursor?: string;
     sourceCursors: ActivitySourceCursorMap;

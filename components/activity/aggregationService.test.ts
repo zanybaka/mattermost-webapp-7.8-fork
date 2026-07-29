@@ -108,9 +108,9 @@ describe('ActivityAggregationService', () => {
         expect(page.sourceCursors).toEqual({mention: '1'});
         expect(page.hasMore).toBe(true);
 
-        const stored = service.getState('server-1');
+        const stored = service.getState('server-1', 'user-1');
         expect(stored?.items).toHaveLength(2);
-        expect(window.localStorage.getItem('mm-webapp-activity-state:server-1')).toEqual(expect.any(String));
+        expect(window.localStorage.getItem('mm-webapp-activity-state:server-1:user-1')).toEqual(expect.any(String));
     });
 
     test('loadInitial hides items older than the visible window', async () => {
@@ -145,6 +145,7 @@ describe('ActivityAggregationService', () => {
         const olderItem = makeItem({postId: 'old', eventTs: NOW - (WEEK_MS + 1000)});
         const state: PersistedActivityState = {
             serverId: 'server-1',
+            userId: 'user-1',
             fetchedAt: NOW,
             uiCursor: String(NOW),
             sourceCursors: {mention: '1'},
@@ -167,6 +168,7 @@ describe('ActivityAggregationService', () => {
     test('refresh reuses the previous visible window', async () => {
         const state: PersistedActivityState = {
             serverId: 'server-1',
+            userId: 'user-1',
             fetchedAt: NOW,
             sourceCursors: {},
             checkpoint: {watermarkTs: 0, mergeSequence: 3, visibleSinceMs: NOW - (4 * WEEK_MS)},
@@ -189,15 +191,18 @@ describe('ActivityAggregationService', () => {
         await service.loadInitial({serverId: 'server-1', userId: 'user-1', nowMs: NOW});
 
         const reloaded = new ActivityAggregationService();
-        expect(reloaded.getState('server-1')?.items.map((item) => item.postId)).toEqual(['p1']);
-        expect(reloaded.getState('missing-server')).toBeNull();
+        expect(reloaded.getState('server-1', 'user-1')?.items.map((item) => item.postId)).toEqual(['p1']);
+        expect(reloaded.getState('missing-server', 'user-1')).toBeNull();
+
+        // Persisted previews belong to the user they were fetched for.
+        expect(reloaded.getState('server-1', 'user-2')).toBeNull();
     });
 
     test('getState returns null and warns when the stored payload is corrupt', () => {
         const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-        window.localStorage.setItem('mm-webapp-activity-state:server-1', 'not-json');
+        window.localStorage.setItem('mm-webapp-activity-state:server-1:user-1', 'not-json');
 
-        expect(new ActivityAggregationService().getState('server-1')).toBeNull();
+        expect(new ActivityAggregationService().getState('server-1', 'user-1')).toBeNull();
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('failed to parse persisted state'));
 
         warn.mockRestore();

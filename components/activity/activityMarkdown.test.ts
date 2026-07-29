@@ -1,13 +1,24 @@
 // Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {escapeHtml, renderActivityMarkdown, sanitizeActivityLinkUrl} from './activityMarkdown';
+import {escapeHtml, renderActivityMarkdown, sanitizeActivityLinkUrl, stripMarkdownSyntax} from './activityMarkdown';
 
 const UNSAFE_SCRIPT_URL = `java${'script'}:alert(1)`;
 
 describe('escapeHtml', () => {
     test('escapes html sensitive characters', () => {
         expect(escapeHtml('<a href="x">a & b</a>')).toBe('&lt;a href=&quot;x&quot;&gt;a &amp; b&lt;/a&gt;');
+    });
+
+    test('escapes single quotes', () => {
+        expect(escapeHtml('<img src="x" onerror=\'y\'>')).toBe('&lt;img src=&quot;x&quot; onerror=&#39;y&#39;&gt;');
+    });
+});
+
+describe('stripMarkdownSyntax', () => {
+    test('removes markdown metacharacters from untrusted text', () => {
+        expect(stripMarkdownSyntax('[Reset password](https://evil.example.com)')).toBe('Reset passwordhttps://evil.example.com');
+        expect(stripMarkdownSyntax('Jane **Doe**')).toBe('Jane Doe');
     });
 });
 
@@ -26,7 +37,14 @@ describe('sanitizeActivityLinkUrl', () => {
     test('drops empty and unsafe protocols', () => {
         expect(sanitizeActivityLinkUrl('   ')).toBe('');
         expect(sanitizeActivityLinkUrl(UNSAFE_SCRIPT_URL)).toBe('');
+        expect(sanitizeActivityLinkUrl(UNSAFE_SCRIPT_URL.toUpperCase())).toBe('');
         expect(sanitizeActivityLinkUrl('data:text/html,<script>')).toBe('');
+    });
+
+    test('drops protocol-relative urls', () => {
+        expect(sanitizeActivityLinkUrl('//evil.example.com/phish')).toBe('');
+        expect(sanitizeActivityLinkUrl('/\\evil.example.com/phish')).toBe('');
+        expect(sanitizeActivityLinkUrl('\\\\evil.example.com/phish')).toBe('');
     });
 });
 
@@ -66,5 +84,10 @@ describe('renderActivityMarkdown', () => {
         expect(renderActivityMarkdown('[text](https://example.com)')).
             toBe('<a href="https://example.com" target="_blank" rel="noopener noreferrer">text</a>');
         expect(renderActivityMarkdown(`[text](${UNSAFE_SCRIPT_URL}`)).toBe(`[text](${UNSAFE_SCRIPT_URL}`);
+    });
+
+    test('does not link unsafe or protocol-relative urls', () => {
+        expect(renderActivityMarkdown(`[click](${UNSAFE_SCRIPT_URL})`)).not.toContain('<a ');
+        expect(renderActivityMarkdown('[click](//evil.example.com)')).not.toContain('<a ');
     });
 });

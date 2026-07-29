@@ -149,7 +149,12 @@ export default class PDFPreview extends React.PureComponent {
             const worker = await import('pdfjs-dist/build/pdf.worker.entry.js');
             PDFJS.GlobalWorkerOptions.workerSrc = worker;
 
-            const pdf = await PDFJS.getDocument(this.props.fileUrl).promise;
+            // isEvalSupported: false blocks the font-rendering eval path abused by
+            // CVE-2024-4367 (arbitrary JS execution from a crafted PDF).
+            const pdf = await PDFJS.getDocument({
+                url: this.props.fileUrl,
+                isEvalSupported: false,
+            }).promise;
             this.onDocumentLoad(pdf);
         } catch (err) {
             this.onDocumentLoadError(err);
