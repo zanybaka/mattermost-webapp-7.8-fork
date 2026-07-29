@@ -1,4 +1,4 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import {dedupeActivityItems, withCanonicalId} from './canonical';
@@ -266,28 +266,28 @@ export class ActivityAggregationService implements ActivityAggregationServiceCon
         };
     };
 
-    loadInitial = async (context: ActivityLoadContext): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'initial');
+    private loadAndPersist = async (
+        context: ActivityLoadContext,
+        mode: 'initial' | 'older',
+        state?: PersistedActivityState,
+    ): Promise<ActivityPage> => {
+        const result = await this.fetchAdapters(context, mode, state);
         const persisted = toPersistedState(context, result.page, result.allItems);
         this.memoryState.set(context.serverId, persisted);
         saveToLocalStorage(persisted);
         return result.page;
     };
 
-    loadOlder = async (context: ActivityLoadContext, state: PersistedActivityState): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'older', state);
-        const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(context.serverId, persisted);
-        saveToLocalStorage(persisted);
-        return result.page;
+    loadInitial = (context: ActivityLoadContext): Promise<ActivityPage> => {
+        return this.loadAndPersist(context, 'initial');
     };
 
-    refresh = async (context: ActivityLoadContext, state?: PersistedActivityState): Promise<ActivityPage> => {
-        const result = await this.fetchAdapters(context, 'initial', state);
-        const persisted = toPersistedState(context, result.page, result.allItems);
-        this.memoryState.set(context.serverId, persisted);
-        saveToLocalStorage(persisted);
-        return result.page;
+    loadOlder = (context: ActivityLoadContext, state: PersistedActivityState): Promise<ActivityPage> => {
+        return this.loadAndPersist(context, 'older', state);
+    };
+
+    refresh = (context: ActivityLoadContext, state?: PersistedActivityState): Promise<ActivityPage> => {
+        return this.loadAndPersist(context, 'initial', state);
     };
 
     searchLocal = (query: string, items: ActivityItem[]): ActivityItem[] => {

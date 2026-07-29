@@ -1,73 +1,31 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
+import type {UserRecord} from '../records';
+import {formatChannelDisplayName, formatUserDisplayName, getString} from '../records';
+import {fetchJSONCached, getUserAvatarURL} from '../api';
+import {getCurrentUserUsername} from '../mentionDisplay';
+
+import type {PostSearchResult} from './shared';
+import {
+    applyMentionRender,
+    buildPostSearchBody,
+    clampSearchPerPage,
+    filterItemsByWindow,
+    loadChannelsById,
+    loadUsersById,
+    mergePostSearchResults,
+    searchPosts,
+} from './shared';
 import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
-
-import {fetchJSON, fetchJSONCached, getUserAvatarURL, postJSON} from '../api';
-import {getCurrentUserUsername, replaceMentionUsernamesWithDisplayNames} from '../mentionDisplay';
-
-type UserRecord = {
-    id: string;
-    username?: string;
-    first_name?: string;
-    last_name?: string;
-    notify_props?: Record<string, string>;
-};
-
-type ChannelRecord = {
-    id: string;
-    display_name?: string;
-    name?: string;
-    type?: string;
-};
 
 type MentionSearchOptions = {
     useSearchMentions: boolean;
     terms: string;
     skipTeamFanOut?: boolean;
 };
-
-function formatUserDisplayName(user?: UserRecord): string {
-    if (!user) {
-        return '';
-    }
-    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    return fullName || user.username || '';
-}
-
-function formatChannelDisplayName(channel?: ChannelRecord): string {
-    if (!channel) {
-        return '';
-    }
-    return (channel.display_name || channel.name || '').trim();
-}
-
-function getString(value: unknown): string {
-    return typeof value === 'string' ? value : '';
-}
-
-function getPostsFromPayload(payload: unknown): Array<Record<string, unknown>> {
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
-
-    if (Array.isArray(payload)) {
-        return payload.filter((post): post is Record<string, unknown> => Boolean(post && typeof post === 'object'));
-    }
-
-    const typed = payload as Record<string, unknown>;
-    const order = Array.isArray(typed.order) ? typed.order.map(String) : [];
-    const posts = (typed.posts || {}) as Record<string, unknown>;
-    if (!order.length) {
-        return [];
-    }
-
-    return order.
-        map((id) => posts[id]).
-        filter((post): post is Record<string, unknown> => Boolean(post && typeof post === 'object'));
-}
 
 function buildMentionSearchTerms(user: UserRecord): string {
     const keys: string[] = [];
@@ -98,162 +56,41 @@ function buildMentionSearchTerms(user: UserRecord): string {
     return uniqueKeys.map((key) => `"${key}"`).join(' ');
 }
 
-async function getTeamIds(serverId: string): Promise<string[]> {
-    const response = await fetchJSON('/api/v4/users/me/teams');
-    if (!response.ok || !Array.isArray(response.data)) {
-        return [];
-    }
-
-    return response.data.
-        filter((team): team is Record<string, unknown> => Boolean(team && typeof team === 'object')).
-        map((team) => String(team.id || '')).
-        filter(Boolean);
-}
-
-function buildSearchBody(params: AdapterFetchParams, options: MentionSearchOptions) {
-    const perPage = Math.max(10, Math.min(params.pageSize, 100));
-    const body: Record<string, unknown> = {
-        terms: options.terms,
-        is_or_search: true,
-        include_deleted_channels: true,
-        time_zone_offset: -new Date().getTimezoneOffset() * 60,
-        page: params.page,
-        per_page: perPage,
-    };
-    if (options.useSearchMentions) {
-        body.search_mentions = true;
-    }
-    return body;
-}
-
 async function searchMentionPosts(
     params: AdapterFetchParams,
     options: MentionSearchOptions,
-): Promise<{posts: Array<Record<string, unknown>>; error?: string}> {
-    const body = buildSearchBody(params, options);
-    const globalResponse = await postJSON('/api/v4/posts/search', body);
-    if (globalResponse.ok) {
-        return {posts: getPostsFromPayload(globalResponse.data)};
-    }
-
-    // Avoid fan-out across every team for supplemental queries — that freezes the UI on large orgs.
-    if (options.useSearchMentions || options.skipTeamFanOut) {
-        return {posts: [], error: globalResponse.error};
-    }
-
-    const teamIds = await getTeamIds(params.serverId);
-    const postsById = new Map<string, Record<string, unknown>>();
-    const responses = await Promise.all(teamIds.map((teamId) => (
-        postJSON(
-            `/api/v4/teams/${encodeURIComponent(teamId)}/posts/search`,
-            body,
-        )
-    )));
-    responses.forEach((response) => {
-        if (!response.ok) {
-            return;
-        }
-
-        getPostsFromPayload(response.data).forEach((post) => {
-            const postId = String(post.id || '');
-            if (postId) {
-                postsById.set(postId, post);
-            }
-        });
+): Promise<PostSearchResult> {
+    const body = buildPostSearchBody({
+        terms: options.terms,
+        page: params.page,
+        perPage: clampSearchPerPage(params.pageSize),
+        searchMentions: options.useSearchMentions,
     });
 
-    const posts = Array.from(postsById.values());
-    const error = globalResponse.error || responses.find((response) => response.error)?.error;
-    if (!posts.length && error) {
-        return {posts: [], error};
-    }
-
-    return {posts};
+    // Supplemental queries skip the per-team fan-out — it freezes the UI on large orgs.
+    const allowTeamFanOut = !options.useSearchMentions && !options.skipTeamFanOut;
+    return searchPosts(body, allowTeamFanOut);
 }
 
-async function searchBroadcastMentionPosts(
-    params: AdapterFetchParams,
-): Promise<{posts: Array<Record<string, unknown>>; error?: string}> {
-    // Time often omits these from search_mentions; query them explicitly without team fan-out.
-    const queries = ['"@channel"', '"@all"', '"@here"'];
-    const postsById = new Map<string, Record<string, unknown>>();
+async function searchMentionQueries(params: AdapterFetchParams, queries: string[]): Promise<PostSearchResult> {
     const results = await Promise.all(queries.map((terms) => (
         searchMentionPosts(params, {useSearchMentions: false, terms, skipTeamFanOut: true})
     )));
-
-    let firstError: string | undefined;
-    results.forEach((result) => {
-        if (!firstError && result.error) {
-            firstError = result.error;
-        }
-        result.posts.forEach((post) => {
-            const postId = String(post.id || '');
-            if (postId) {
-                postsById.set(postId, post);
-            }
-        });
-    });
-
-    const posts = Array.from(postsById.values());
-    return {
-        posts,
-        error: posts.length ? undefined : firstError,
-    };
+    return mergePostSearchResults(...results);
 }
 
-async function searchFallbackMentionPosts(
-    params: AdapterFetchParams,
-    user: UserRecord,
-): Promise<{posts: Array<Record<string, unknown>>; error?: string}> {
-    const personalTerms = buildMentionSearchTerms(user);
+async function searchBroadcastMentionPosts(params: AdapterFetchParams): Promise<PostSearchResult> {
+    // Time often omits these from search_mentions; query them explicitly without team fan-out.
+    return searchMentionQueries(params, ['"@channel"', '"@all"', '"@here"']);
+}
+
+async function searchFallbackMentionPosts(params: AdapterFetchParams, user: UserRecord): Promise<PostSearchResult> {
     const queries = [
-        personalTerms,
+        buildMentionSearchTerms(user),
         ...(user.notify_props?.channel === 'true' ? ['"@channel"', '"@all"', '"@here"'] : []),
     ].filter(Boolean);
 
-    const postsById = new Map<string, Record<string, unknown>>();
-    const results = await Promise.all(queries.map((terms) => (
-        searchMentionPosts(params, {useSearchMentions: false, terms, skipTeamFanOut: true})
-    )));
-    results.forEach((result) => {
-        result.posts.forEach((post) => {
-            const postId = String(post.id || '');
-            if (postId) {
-                postsById.set(postId, post);
-            }
-        });
-    });
-
-    const posts = Array.from(postsById.values());
-    return {
-        posts,
-        error: posts.length ? undefined : results.find((result) => result.error)?.error,
-    };
-}
-
-async function loadChannelsById(serverId: string): Promise<Map<string, ChannelRecord>> {
-    const channelsById = new Map<string, ChannelRecord>();
-    const channelsResponse = await fetchJSONCached('/api/v4/users/me/channels');
-    if (!channelsResponse.ok || !Array.isArray(channelsResponse.data)) {
-        return channelsById;
-    }
-
-    channelsResponse.data.
-        filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')).
-        forEach((entry) => {
-            const channelId = String(entry.id || '');
-            if (!channelId) {
-                return;
-            }
-            channelsById.set(channelId, {
-                id: channelId,
-                display_name: String(entry.display_name || ''),
-                name: String(entry.name || ''),
-                type: String(entry.type || ''),
-            });
-        });
-
-    return channelsById;
+    return searchMentionQueries(params, queries);
 }
 
 function extractMentionPreview(post: Record<string, unknown>): string {
@@ -330,31 +167,6 @@ function normalizeMention(serverId: string, userId: string, post: Record<string,
     };
 }
 
-async function mergeMentionSearchResults(
-    ...results: Array<{posts: Array<Record<string, unknown>>; error?: string}>
-): Promise<{posts: Array<Record<string, unknown>>; error?: string}> {
-    const postsById = new Map<string, Record<string, unknown>>();
-    let firstError: string | undefined;
-
-    results.forEach((result) => {
-        if (!firstError && result.error) {
-            firstError = result.error;
-        }
-        result.posts.forEach((post) => {
-            const postId = String(post.id || '');
-            if (postId) {
-                postsById.set(postId, post);
-            }
-        });
-    });
-
-    const posts = Array.from(postsById.values());
-    return {
-        posts,
-        error: posts.length ? undefined : firstError,
-    };
-}
-
 async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: ActivityItem[]; error?: string}> {
     if (!params.userId) {
         return {items: []};
@@ -364,7 +176,7 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
     // Merge lightweight broadcast-only queries (no per-team fan-out) so the UI stays responsive.
     const primaryResult = await searchMentionPosts(params, {useSearchMentions: true, terms: ''});
     const broadcastResult = await searchBroadcastMentionPosts(params);
-    let searchResult = await mergeMentionSearchResults(primaryResult, broadcastResult);
+    let searchResult = mergePostSearchResults(primaryResult, broadcastResult);
 
     if (!searchResult.posts.length) {
         const userResponse = await fetchJSONCached(`/api/v4/users/${encodeURIComponent(params.userId)}`);
@@ -382,18 +194,10 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
         return {items: [], error};
     }
 
-    const channelsById = await loadChannelsById(params.serverId);
-    const actorIds = Array.from(new Set(posts.map((post) => String(post.user_id || '')).filter(Boolean)));
-    const userMap = new Map<string, UserRecord>();
+    const channelsById = await loadChannelsById();
     const mentionNameCache = new Map<string, string | null>();
     const selfUsername = await getCurrentUserUsername(params.serverId, params.userId);
-
-    await Promise.all(actorIds.map(async (actorId) => {
-        const response = await fetchJSONCached(`/api/v4/users/${encodeURIComponent(actorId)}`);
-        if (response.ok && response.data && typeof response.data === 'object') {
-            userMap.set(actorId, response.data as UserRecord);
-        }
-    }));
+    const userMap = await loadUsersById(posts.map((post) => String(post.user_id || '')));
 
     const seen = new Set<string>();
     const normalizedItems = await Promise.all(posts.
@@ -412,22 +216,10 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
                 formatUserDisplayName(userMap.get(actorId)),
                 formatChannelDisplayName(channelsById.get(channelId)),
             );
-            const mentionRender = await replaceMentionUsernamesWithDisplayNames(
-                params.serverId,
-                normalized.previewText,
-                mentionNameCache,
-                selfUsername,
-            );
-            normalized.previewText = mentionRender.text;
-            normalized.sourceRef = {
-                ...(normalized.sourceRef || {}),
-                personalMention: mentionRender.hasPersonalMention ? 'true' : '',
-                broadcastMention: mentionRender.hasBroadcastMention ? 'true' : '',
-            };
-            return normalized;
+            return applyMentionRender(normalized, params.serverId, mentionNameCache, selfUsername);
         }));
 
-    const items = normalizedItems.
+    const deduped = normalizedItems.
         filter((item) => {
             if (!item.postId || seen.has(item.postId)) {
                 return false;
@@ -435,9 +227,8 @@ async function fetchMentionPosts(params: AdapterFetchParams): Promise<{items: Ac
             seen.add(item.postId);
             return true;
         }).
-        filter((item) => item.actorUserId !== params.userId).
-        filter((item) => item.eventTs >= params.sinceMs).
-        filter((item) => !params.beforeMs || item.eventTs < params.beforeMs);
+        filter((item) => item.actorUserId !== params.userId);
+    const items = filterItemsByWindow(deduped, params);
 
     return {items, error};
 }
@@ -447,7 +238,7 @@ export class MentionsAdapter implements ActivitySourceAdapter {
 
     async fetch(params: AdapterFetchParams): Promise<AdapterFetchResult> {
         const {items, error} = await fetchMentionPosts(params);
-        const perPage = Math.max(10, Math.min(params.pageSize, 100));
+        const perPage = clampSearchPerPage(params.pageSize);
         return {
             kind: this.kind,
             items,

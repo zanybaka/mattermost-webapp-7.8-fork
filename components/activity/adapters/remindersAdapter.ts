@@ -1,11 +1,15 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
+import {toRecordArray} from '../records';
 
 import {fetchJSON} from '../api';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
+
+import {filterItemsByWindow} from './shared';
 
 const remindersUnsupportedServers = new Set<string>();
 
@@ -51,12 +55,10 @@ export class RemindersAdapter implements ActivitySourceAdapter {
             return {kind: this.kind, items: [], error: response.error, nextCursor: undefined};
         }
 
-        const reminders = Array.isArray(response.data) ? response.data : [];
-        const items = reminders.
-            filter((reminder): reminder is Record<string, unknown> => Boolean(reminder && typeof reminder === 'object')).
-            map((reminder) => normalizeReminder(params.serverId, params.userId, reminder)).
-            filter((item) => item.eventTs >= params.sinceMs).
-            filter((item) => !params.beforeMs || item.eventTs < params.beforeMs);
+        const items = filterItemsByWindow(
+            toRecordArray(response.data).map((reminder) => normalizeReminder(params.serverId, params.userId, reminder)),
+            params,
+        );
 
         return {
             kind: this.kind,
