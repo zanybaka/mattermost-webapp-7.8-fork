@@ -1,73 +1,24 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
+import {formatChannelDisplayName, formatUserDisplayName, getObject, getString, toRecordArray} from '../records';
+import {getCurrentUserUsername} from '../mentionDisplay';
+import {fetchJSON, getUserAvatarURL} from '../api';
+
+import {
+    applyMentionRender,
+    filterItemsByWindow,
+    getTeamIds,
+    loadChannelsById,
+    loadUsersById,
+} from './shared';
 import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
 
-import {getCurrentUserUsername, replaceMentionUsernamesWithDisplayNames} from '../mentionDisplay';
-import {fetchJSON, fetchJSONCached, getUserAvatarURL} from '../api';
-
-type UserRecord = {
-    id: string;
-    username?: string;
-    first_name?: string;
-    last_name?: string;
-};
-
-type ChannelRecord = {
-    id: string;
-    display_name?: string;
-    name?: string;
-};
-
-function formatUserDisplayName(user?: UserRecord): string {
-    if (!user) {
-        return '';
-    }
-    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    return fullName || user.username || '';
-}
-
-function formatChannelDisplayName(channel?: ChannelRecord): string {
-    if (!channel) {
-        return '';
-    }
-    return (channel.display_name || channel.name || '').trim();
-}
-
-async function getTeamIds(serverId: string): Promise<string[]> {
-    const response = await fetchJSON('/api/v4/users/me/teams');
-    if (!response.ok || !Array.isArray(response.data)) {
-        return [];
-    }
-
-    return response.data.
-        filter((team): team is Record<string, unknown> => Boolean(team && typeof team === 'object')).
-        map((team) => String(team.id || '')).
-        filter(Boolean);
-}
-
 function extractThreads(payload: unknown): Array<Record<string, unknown>> {
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
-
-    const typed = payload as Record<string, unknown>;
-    const threads = typed.threads;
-    if (!Array.isArray(threads)) {
-        return [];
-    }
-
-    return threads.filter((thread): thread is Record<string, unknown> => Boolean(thread && typeof thread === 'object'));
-}
-
-function getString(value: unknown): string {
-    return typeof value === 'string' ? value : '';
-}
-
-function getObject(value: unknown): Record<string, unknown> | undefined {
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+    const typed = getObject(payload);
+    return typed ? toRecordArray(typed.threads) : [];
 }
 
 function extractThreadSnippet(thread: Record<string, unknown>): string {
@@ -183,7 +134,7 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
     kind: AdapterFetchResult['kind'] = 'thread_reply';
 
     async fetch(params: AdapterFetchParams): Promise<AdapterFetchResult> {
-        const teamIds = await getTeamIds(params.serverId);
+        const teamIds = await getTeamIds();
         const query = `deleted=false&page=${params.page}&per_page=${params.pageSize}&totalsOnly=false&extended=true&skipTotal=true&disable_channel_type_group=true`;
         const baseEndpoints = [
             `/api/v4/users/me/teams/threads?page=${params.page}&per_page=${params.pageSize}&extended=true`,
@@ -217,36 +168,10 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
             return {kind: this.kind, items: [], error: lastError};
         }
 
-        const channelsMap = new Map<string, ChannelRecord>();
-        const channelsResponse = await fetchJSONCached('/api/v4/users/me/channels');
-        if (channelsResponse.ok && Array.isArray(channelsResponse.data)) {
-            channelsResponse.data.
-                filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')).
-                forEach((entry) => {
-                    const channelId = String(entry.id || '');
-                    if (!channelId) {
-                        return;
-                    }
-                    channelsMap.set(channelId, {
-                        id: channelId,
-                        display_name: String(entry.display_name || ''),
-                        name: String(entry.name || ''),
-                    });
-                });
-        }
-
-        const actorIds = Array.from(new Set(
-            collected.
-                map((thread) => extractThreadActorUserId(thread)).
-                filter((id): id is string => Boolean(id)),
-        ));
-        const userMap = new Map<string, UserRecord>();
-        await Promise.all(actorIds.map(async (actorId) => {
-            const response = await fetchJSONCached(`/api/v4/users/${encodeURIComponent(actorId)}`);
-            if (response.ok && response.data && typeof response.data === 'object') {
-                userMap.set(actorId, response.data as UserRecord);
-            }
-        }));
+        const channelsMap = await loadChannelsById();
+        const userMap = await loadUsersById(collected.
+            map((thread) => extractThreadActorUserId(thread)).
+            filter((id): id is string => Boolean(id)));
 
         const mentionNameCache = new Map<string, string | null>();
         const selfUsername = await getCurrentUserUsername(params.serverId, params.userId);
@@ -260,25 +185,13 @@ export class ThreadsAdapter implements ActivitySourceAdapter {
                 formatUserDisplayName(actorId ? userMap.get(actorId) : undefined),
                 formatChannelDisplayName(channelsMap.get(channelId)),
             );
-            const mentionRender = await replaceMentionUsernamesWithDisplayNames(
-                params.serverId,
-                normalized.previewText,
-                mentionNameCache,
-                selfUsername,
-            );
-            normalized.previewText = mentionRender.text;
-            normalized.sourceRef = {
-                ...(normalized.sourceRef || {}),
-                personalMention: mentionRender.hasPersonalMention ? 'true' : '',
-                broadcastMention: mentionRender.hasBroadcastMention ? 'true' : '',
-            };
-            return normalized;
+            return applyMentionRender(normalized, params.serverId, mentionNameCache, selfUsername);
         }));
 
-        const filteredItems = items.
-            filter((item) => item.actorUserId !== params.userId).
-            filter((item) => item.eventTs >= params.sinceMs).
-            filter((item) => !params.beforeMs || item.eventTs < params.beforeMs);
+        const filteredItems = filterItemsByWindow(
+            items.filter((item) => item.actorUserId !== params.userId),
+            params,
+        );
 
         return {
             kind: this.kind,

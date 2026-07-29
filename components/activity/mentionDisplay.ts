@@ -1,23 +1,24 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
+import type {UserRecord} from './records';
+import {formatUserDisplayName} from './records';
 import {fetchJSONCached} from './api';
-
-type UserRecord = {
-    username?: string;
-    first_name?: string;
-    last_name?: string;
-};
 
 const USERNAME_DISPLAY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const BROADCAST_MENTION_KEYS = new Set(['all', 'channel', 'here']);
+const BROADCAST_MENTION_PATTERN = /(^|[\s(])@(here|all|channel)\b/i;
 
-function formatUserDisplayName(user?: UserRecord): string {
-    if (!user) {
-        return '';
+export function hasBroadcastMention(text: string): boolean {
+    return BROADCAST_MENTION_PATTERN.test(text || '');
+}
+
+export function hasPersonalMention(text: string, selfUsername: string): boolean {
+    const normalizedSelfUsername = selfUsername.trim().toLowerCase();
+    if (!normalizedSelfUsername) {
+        return false;
     }
-    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    return fullName || user.username || '';
+    return (text || '').toLowerCase().includes(`@${normalizedSelfUsername}`);
 }
 
 function extractMentionUsernames(text: string): string[] {
@@ -63,7 +64,7 @@ export async function replaceMentionUsernamesWithDisplayNames(
     }
 
     const normalizedSelfUsername = selfUsername.trim().toLowerCase();
-    const hasBroadcastMention = (/(^|[\s(])@(here|all|channel)\b/i).test(text);
+    const broadcastMention = hasBroadcastMention(text);
     const usernames = extractMentionUsernames(text);
 
     await Promise.all(usernames.map(async (username) => {
@@ -74,10 +75,10 @@ export async function replaceMentionUsernamesWithDisplayNames(
         cache.set(username, displayName);
     }));
 
-    let hasPersonalMention = false;
+    let personalMention = false;
     const renderedText = text.replace(/(^|[\s(])@([a-z0-9._-]+)/gi, (fullMatch, prefix: string, username: string) => {
         if (normalizedSelfUsername && String(username || '').toLowerCase() === normalizedSelfUsername) {
-            hasPersonalMention = true;
+            personalMention = true;
         }
         const replacement = cache.get((username || '').toLowerCase());
         if (!replacement) {
@@ -88,8 +89,8 @@ export async function replaceMentionUsernamesWithDisplayNames(
 
     return {
         text: renderedText,
-        hasPersonalMention,
-        hasBroadcastMention,
+        hasPersonalMention: personalMention,
+        hasBroadcastMention: broadcastMention,
     };
 }
 
