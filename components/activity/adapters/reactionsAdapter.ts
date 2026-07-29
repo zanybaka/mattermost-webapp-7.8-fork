@@ -1,12 +1,17 @@
-// Copyright (c) 2016-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import type {ActivityItem} from '../types';
 
-import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
+import {toRecordArray} from '../records';
 
-import {fetchJSON, fetchJSONCached, getEmojiImageURL, getUserAvatarURL, postJSON} from '../api';
+import {fetchJSONCached, getEmojiImageURL, getUserAvatarURL} from '../api';
+
 import {getCurrentUserUsername} from '../mentionDisplay';
+
+import type {ActivitySourceAdapter, AdapterFetchParams, AdapterFetchResult} from './types';
+import type {PostSearchResult} from './shared';
+import {buildPostSearchBody, filterItemsByWindow, searchPosts} from './shared';
 
 const MAX_SEARCH_PAGES = 10;
 const SEARCH_PER_PAGE = 100;
@@ -17,33 +22,7 @@ function extractReactions(post: Record<string, unknown>): Array<Record<string, u
         return [];
     }
 
-    const reactions = (metadata as Record<string, unknown>).reactions;
-    if (!Array.isArray(reactions)) {
-        return [];
-    }
-
-    return reactions.filter((reaction): reaction is Record<string, unknown> => Boolean(reaction && typeof reaction === 'object'));
-}
-
-function getPostsFromPayload(payload: unknown): Array<Record<string, unknown>> {
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
-
-    if (Array.isArray(payload)) {
-        return payload.filter((post): post is Record<string, unknown> => Boolean(post && typeof post === 'object'));
-    }
-
-    const typed = payload as Record<string, unknown>;
-    const order = Array.isArray(typed.order) ? typed.order.map(String) : [];
-    const posts = (typed.posts || {}) as Record<string, unknown>;
-    if (!order.length) {
-        return [];
-    }
-
-    return order.
-        map((id) => posts[id]).
-        filter((post): post is Record<string, unknown> => Boolean(post && typeof post === 'object'));
+    return toRecordArray((metadata as Record<string, unknown>).reactions);
 }
 
 function formatSearchAfterDate(sinceMs: number): string {
@@ -54,64 +33,9 @@ function formatSearchAfterDate(sinceMs: number): string {
     return `${year}-${month}-${day}`;
 }
 
-async function getTeamIds(serverId: string): Promise<string[]> {
-    const response = await fetchJSON('/api/v4/users/me/teams');
-    if (!response.ok || !Array.isArray(response.data)) {
-        return [];
-    }
-
-    return response.data.
-        filter((team): team is Record<string, unknown> => Boolean(team && typeof team === 'object')).
-        map((team) => String(team.id || '')).
-        filter(Boolean);
-}
-
-async function searchOwnPostsPage(
-    params: AdapterFetchParams,
-    terms: string,
-    page: number,
-): Promise<{posts: Array<Record<string, unknown>>; error?: string}> {
-    const body: Record<string, unknown> = {
-        terms,
-        is_or_search: true,
-        include_deleted_channels: true,
-        time_zone_offset: -new Date().getTimezoneOffset() * 60,
-        page,
-        per_page: SEARCH_PER_PAGE,
-    };
-
-    const globalResponse = await postJSON('/api/v4/posts/search', body);
-    if (globalResponse.ok) {
-        return {posts: getPostsFromPayload(globalResponse.data)};
-    }
-
-    const teamIds = await getTeamIds(params.serverId);
-    const postsById = new Map<string, Record<string, unknown>>();
-    const responses = await Promise.all(teamIds.map((teamId) => (
-        postJSON(
-            `/api/v4/teams/${encodeURIComponent(teamId)}/posts/search`,
-            body,
-        )
-    )));
-    responses.forEach((response) => {
-        if (!response.ok) {
-            return;
-        }
-        getPostsFromPayload(response.data).forEach((post) => {
-            const postId = String(post.id || '');
-            if (postId) {
-                postsById.set(postId, post);
-            }
-        });
-    });
-
-    const posts = Array.from(postsById.values());
-    const error = globalResponse.error || responses.find((response) => response.error)?.error;
-    if (!posts.length && error) {
-        return {posts: [], error};
-    }
-
-    return {posts};
+async function searchOwnPostsPage(terms: string, page: number): Promise<PostSearchResult> {
+    const body = buildPostSearchBody({terms, page, perPage: SEARCH_PER_PAGE});
+    return searchPosts(body, true);
 }
 
 async function resolveCustomEmojiImageUrls(emojiNames: string[]): Promise<Map<string, string>> {
@@ -186,7 +110,7 @@ export class ReactionsAdapter implements ActivitySourceAdapter {
 
         for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
             // eslint-disable-next-line no-await-in-loop
-            const pageResult = await searchOwnPostsPage(params, terms, page);
+            const pageResult = await searchOwnPostsPage(terms, page);
             if (pageResult.error && !firstError) {
                 firstError = pageResult.error;
             }
@@ -240,7 +164,7 @@ export class ReactionsAdapter implements ActivitySourceAdapter {
                 filter(Boolean),
         ));
         const emojiImageUrlsByName = await resolveCustomEmojiImageUrls(emojiNames);
-        const items = reactions.
+        const normalizedItems = reactions.
             map((reaction) => normalizeReaction(
                 params.serverId,
                 params.userId,
@@ -255,9 +179,8 @@ export class ReactionsAdapter implements ActivitySourceAdapter {
                 }
                 seen.add(key);
                 return true;
-            }).
-            filter((item) => item.eventTs >= params.sinceMs).
-            filter((item) => !params.beforeMs || item.eventTs < params.beforeMs).
+            });
+        const items = filterItemsByWindow(normalizedItems, params).
             sort((a, b) => b.eventTs - a.eventTs);
 
         return {
